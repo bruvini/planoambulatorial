@@ -29,7 +29,7 @@ import { toast } from "sonner";
 
 import { parseDbfFile, type DbfRow } from "@/lib/dbf-parser";
 import { aggregateProduction, projectQueue, monthsToZero } from "@/lib/analytics";
-import { selectAggregatedProduction, useStore, type DbfUpload } from "@/lib/store";
+import { useStore, type DbfUpload } from "@/lib/store";
 import type { Procedure } from "@/lib/procedures-data";
 
 export const Route = createFileRoute("/")({
@@ -50,6 +50,31 @@ const fmt = (n: number, d = 0) =>
   new Intl.NumberFormat("pt-BR", { maximumFractionDigits: d, minimumFractionDigits: d }).format(n);
 const fmtBRL = (n: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
+
+function buildAggregatedProduction(
+  procedures: Procedure[],
+  uploads: DbfUpload[],
+  selectedUploadIds: string[],
+) {
+  const map: Record<string, { produced: number; presented: number; valueApproved: number; months: number }> = {};
+  for (const p of procedures) map[p.id] = { produced: 0, presented: 0, valueApproved: 0, months: 0 };
+
+  const selectedSet = new Set(selectedUploadIds);
+  const selectedUploads = uploads.filter((u) => selectedSet.includes(u.id));
+  for (const upload of selectedUploads) {
+    for (const p of procedures) {
+      const value = upload.production[p.id];
+      if (!value) continue;
+      map[p.id].produced += value.produced;
+      map[p.id].presented += value.presented;
+      map[p.id].valueApproved += value.valueApproved;
+    }
+  }
+
+  const monthsCount = new Set(selectedUploads.map((u) => u.competencia)).size || 1;
+  for (const id in map) map[id].months = monthsCount;
+  return map;
+}
 
 function Dashboard() {
   return (
