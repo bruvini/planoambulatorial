@@ -60,7 +60,7 @@ function buildAggregatedProduction(
   for (const p of procedures) map[p.id] = { produced: 0, presented: 0, valueApproved: 0, months: 0 };
 
   const selectedSet = new Set(selectedUploadIds);
-  const selectedUploads = uploads.filter((u) => selectedSet.includes(u.id));
+  const selectedUploads = uploads.filter((u) => selectedSet.has(u.id));
   for (const upload of selectedUploads) {
     for (const p of procedures) {
       const value = upload.production[p.id];
