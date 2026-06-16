@@ -29,7 +29,7 @@ import { toast } from "sonner";
 
 import { parseDbfFile, type DbfRow } from "@/lib/dbf-parser";
 import { aggregateProduction, projectQueue, monthsToZero } from "@/lib/analytics";
-import { selectAggregatedProduction, useStore, type DbfUpload } from "@/lib/store";
+import { useStore, type DbfUpload } from "@/lib/store";
 import type { Procedure } from "@/lib/procedures-data";
 
 export const Route = createFileRoute("/")({
@@ -50,6 +50,31 @@ const fmt = (n: number, d = 0) =>
   new Intl.NumberFormat("pt-BR", { maximumFractionDigits: d, minimumFractionDigits: d }).format(n);
 const fmtBRL = (n: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
+
+function buildAggregatedProduction(
+  procedures: Procedure[],
+  uploads: DbfUpload[],
+  selectedUploadIds: string[],
+) {
+  const map: Record<string, { produced: number; presented: number; valueApproved: number; months: number }> = {};
+  for (const p of procedures) map[p.id] = { produced: 0, presented: 0, valueApproved: 0, months: 0 };
+
+  const selectedSet = new Set(selectedUploadIds);
+  const selectedUploads = uploads.filter((u) => selectedSet.has(u.id));
+  for (const upload of selectedUploads) {
+    for (const p of procedures) {
+      const value = upload.production[p.id];
+      if (!value) continue;
+      map[p.id].produced += value.produced;
+      map[p.id].presented += value.presented;
+      map[p.id].valueApproved += value.valueApproved;
+    }
+  }
+
+  const monthsCount = new Set(selectedUploads.map((u) => u.competencia)).size || 1;
+  for (const id in map) map[id].months = monthsCount;
+  return map;
+}
 
 function Dashboard() {
   return (
@@ -127,13 +152,17 @@ function Header() {
 function OverviewTab() {
   const procedures = useStore((s) => s.procedures);
   const uploads = useStore((s) => s.uploads);
-  const prodMap = useStore(selectAggregatedProduction);
+  const selectedUploadIds = useStore((s) => s.selectedUploadIds);
   const demand = useStore((s) => s.demand);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
 
   const totalMeta = procedures.reduce((a, p) => a + p.metaTotal, 0);
   const totalMetaReg = procedures.reduce((a, p) => a + p.metaRegulacao, 0);
   const totalFila = Object.values(demand).reduce((a, d) => a + d.filaAtual, 0);
-  const months = new Set(uploads.map((u) => u.competencia)).size || 0;
+  const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
   const totalProdMensal =
     months > 0
       ? Object.values(prodMap).reduce((a, v) => a + v.produced, 0) / months
@@ -560,9 +589,12 @@ function RulesTab() {
 
 function ProductionTab() {
   const procedures = useStore((s) => s.procedures);
-  const prodMap = useStore(selectAggregatedProduction);
   const uploads = useStore((s) => s.uploads);
   const selectedUploadIds = useStore((s) => s.selectedUploadIds);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
   const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
 
   const rows = useMemo(() => {
@@ -747,9 +779,12 @@ function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
   const setDemand = useStore((s) => s.setDemand);
-  const prodMap = useStore(selectAggregatedProduction);
   const uploads = useStore((s) => s.uploads);
   const selectedUploadIds = useStore((s) => s.selectedUploadIds);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
   const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
 
   const [selectedId, setSelectedId] = useState<string>(
