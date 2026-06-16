@@ -152,13 +152,17 @@ function Header() {
 function OverviewTab() {
   const procedures = useStore((s) => s.procedures);
   const uploads = useStore((s) => s.uploads);
-  const prodMap = useStore(selectAggregatedProduction);
+  const selectedUploadIds = useStore((s) => s.selectedUploadIds);
   const demand = useStore((s) => s.demand);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
 
   const totalMeta = procedures.reduce((a, p) => a + p.metaTotal, 0);
   const totalMetaReg = procedures.reduce((a, p) => a + p.metaRegulacao, 0);
   const totalFila = Object.values(demand).reduce((a, d) => a + d.filaAtual, 0);
-  const months = new Set(uploads.map((u) => u.competencia)).size || 0;
+  const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
   const totalProdMensal =
     months > 0
       ? Object.values(prodMap).reduce((a, v) => a + v.produced, 0) / months
@@ -585,9 +589,12 @@ function RulesTab() {
 
 function ProductionTab() {
   const procedures = useStore((s) => s.procedures);
-  const prodMap = useStore(selectAggregatedProduction);
   const uploads = useStore((s) => s.uploads);
   const selectedUploadIds = useStore((s) => s.selectedUploadIds);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
   const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
 
   const rows = useMemo(() => {
@@ -772,9 +779,12 @@ function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
   const setDemand = useStore((s) => s.setDemand);
-  const prodMap = useStore(selectAggregatedProduction);
   const uploads = useStore((s) => s.uploads);
   const selectedUploadIds = useStore((s) => s.selectedUploadIds);
+  const prodMap = useMemo(
+    () => buildAggregatedProduction(procedures, uploads, selectedUploadIds),
+    [procedures, uploads, selectedUploadIds],
+  );
   const months = new Set(uploads.filter((u) => selectedUploadIds.includes(u.id)).map((u) => u.competencia)).size || 0;
 
   const [selectedId, setSelectedId] = useState<string>(
