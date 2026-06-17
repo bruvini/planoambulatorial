@@ -44,6 +44,7 @@ type Store = {
   setDemandBulk: (entries: Record<string, Partial<DemandEntry>>) => void;
   initDemandFromProcedure: (id: string) => void;
   clearAll: () => void;
+  setUploadsBulk: (uploads: DbfUpload[]) => void;
 };
 
 const defaultDemand = (p: Procedure): DemandEntry => ({
@@ -85,6 +86,14 @@ export const useStore = create<Store>()(
             ? get().selectedUploadIds.filter((x) => x !== id)
             : [...get().selectedUploadIds, id],
         }),
+      
+      // IMPLEMENTAÇÃO DO setUploadsBulk AQUI:
+      setUploadsBulk: (uploads) =>
+        set({
+          uploads,
+          selectedUploadIds: uploads.map((u) => u.id),
+        }),
+
       setDemand: (id, patch) => {
         const proc = get().procedures.find((p) => p.id === id);
         if (!proc) return;

@@ -1,3 +1,4 @@
+import { saveUploadToCloud, deleteUploadFromCloud, loadUploadsFromCloud } from "@/lib/upload-sync";
 import { Fragment, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -80,6 +81,34 @@ function buildAggregatedProduction(
 }
 
 function Dashboard() {
+  const setUploadsBulk = useStore((s) => s.setUploadsBulk);
+  const setDemandBulk = useStore((s) => s.setDemandBulk);
+
+  useEffect(() => {
+    async function bootstrapCloudData() {
+      try {
+        // 1. Carrega os uploads do TABWIN (.DBF) de forma automática
+        const cloudUploads = await loadUploadsFromCloud();
+        if (cloudUploads && cloudUploads.length > 0) {
+          setUploadsBulk(cloudUploads);
+        }
+
+        // 2. Aproveita para carregar também os dados de Demanda/Fila salvos na nuvem
+        const cloudDemand = await loadDemandFromCloud();
+        if (cloudDemand && Object.keys(cloudDemand).length > 0) {
+          setDemandBulk(cloudDemand);
+        }
+
+        toast.success("Painel sincronizado com o Supabase com sucesso!");
+      } catch (error) {
+        console.error("Falha na inicialização dos dados da nuvem:", error);
+        toast.error("Aviso: Não foi possível sincronizar os dados com a nuvem.");
+      }
+    }
+
+    bootstrapCloudData();
+  }, [setUploadsBulk, setDemandBulk]);
+
   return (
     <div className="min-h-screen bg-background">
       <Toaster richColors position="top-right" />
@@ -104,7 +133,7 @@ function Dashboard() {
         </Tabs>
       </main>
       <footer className="mx-auto max-w-[1400px] px-4 pb-8 pt-2 text-xs text-muted-foreground lg:px-8">
-        Painel HMSJ · Estudo de Produção Ambulatorial · Convênio SUS · Dados armazenados localmente no seu navegador.
+        Painel HMSJ · Estudo de Projeção Ambulatorial · Sincronizado automaticamente com a nuvem.
       </footer>
     </div>
   );
@@ -288,7 +317,8 @@ function UploadTab() {
             toast.error(`${file.name}: não é um arquivo de Produção Ambulatorial SIA (campo PRD_PA ausente).`);
             continue;
           }
-          // Determine competência (PRD_CMP majority)
+
+          // Determine competência
           const cmpCount: Record<string, number> = {};
           for (const r of dbf.rows) {
             const k = String(r.PRD_CMP ?? "").trim();
@@ -301,6 +331,7 @@ function UploadTab() {
           agg.forEach((v, k) => {
             production[k] = { produced: v.produced, presented: v.presented, valueApproved: v.valueApproved, records: v.records };
           });
+
           const upload: DbfUpload = {
             id: crypto.randomUUID(),
             fileName: file.name,
@@ -309,8 +340,13 @@ function UploadTab() {
             uploadedAt: new Date().toISOString(),
             production,
           };
+
+          // 1. Salva na nuvem (Supabase)
+          await saveUploadToCloud(upload);
+
+          // 2. Salva localmente (Zustand)
           addUpload(upload);
-          toast.success(`${file.name} importado — ${fmt(dbf.recordCount)} registros · competência ${competencia}.`);
+          toast.success(`${file.name} salvo na nuvem — ${fmt(dbf.recordCount)} registros · competência ${competencia}.`);
         } catch (e: any) {
           console.error(e);
           toast.error(`${file.name}: ${e?.message ?? "falha ao processar"}`);
@@ -322,113 +358,126 @@ function UploadTab() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Importar arquivos do TABWIN (.DBF)</CardTitle>
-          <CardDescription>
-            Selecione um ou mais arquivos <code>.dbf</code> de Produção Ambulatorial SIA/SUS. O parsing é feito
-            integralmente no navegador — nenhum dado é enviado a servidores. Cada arquivo é consolidado por
-            competência (PRD_CMP) e cruzado automaticamente com os 55 procedimentos do convênio.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div
-            className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 p-10 text-center transition hover:border-primary/50"
-            onDragOver={(e) => { e.preventDefault(); }}
-            onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-          >
-            <FileSpreadsheet className="h-10 w-10 text-primary" />
-            <div>
-              <p className="font-medium">Arraste arquivos .DBF aqui ou clique para selecionar</p>
-              <p className="text-xs text-muted-foreground">
-                Aceita múltiplos arquivos. Identifica campos PRD_PA, PRD_CBO, PRD_QT_A, PRD_CMP automaticamente.
-              </p>
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".dbf,application/x-dbf"
-              multiple
-              onChange={(e) => handleFiles(e.target.files)}
-              className="hidden"
-            />
-            <Button onClick={() => fileRef.current?.click()} disabled={busy}>
-              {busy ? "Processando…" : "Selecionar arquivos .DBF"}
-            </Button>
+  // Função para deletar da nuvem e do Zustand
+  async function handleDelete(id: string) {
+    try {
+      await deleteUploadFromCloud(id);
+      removeUpload(id);
+      toast.success("Arquivo removido da nuvem com sucesso.");
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao remover arquivo da nuvem.");
+    }
+  }
+}
+
+return (
+  <div className="space-y-6">
+    <Card>
+      <CardHeader>
+        <CardTitle>Importar arquivos do TABWIN (.DBF)</CardTitle>
+        <CardDescription>
+          Selecione um ou mais arquivos <code>.dbf</code> de Produção Ambulatorial SIA/SUS. O parsing é feito
+          integralmente no navegador — nenhum dado é enviado a servidores. Cada arquivo é consolidado por
+          competência (PRD_CMP) e cruzado automaticamente com os 55 procedimentos do convênio.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div
+          className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 p-10 text-center transition hover:border-primary/50"
+          onDragOver={(e) => { e.preventDefault(); }}
+          onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+        >
+          <FileSpreadsheet className="h-10 w-10 text-primary" />
+          <div>
+            <p className="font-medium">Arraste arquivos .DBF aqui ou clique para selecionar</p>
+            <p className="text-xs text-muted-foreground">
+              Aceita múltiplos arquivos. Identifica campos PRD_PA, PRD_CBO, PRD_QT_A, PRD_CMP automaticamente.
+            </p>
           </div>
-        </CardContent>
-      </Card>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".dbf,application/x-dbf"
+            multiple
+            onChange={(e) => handleFiles(e.target.files)}
+            className="hidden"
+          />
+          <Button onClick={() => fileRef.current?.click()} disabled={busy}>
+            {busy ? "Processando…" : "Selecionar arquivos .DBF"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Arquivos importados ({uploads.length})</CardTitle>
-          <CardDescription>
-            Marque quais competências devem entrar no cálculo de produção vs meta. Médias mensais usam o número de
-            competências distintas selecionadas.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {uploads.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum arquivo importado ainda.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">Usar</TableHead>
-                  <TableHead>Arquivo</TableHead>
-                  <TableHead>Competência</TableHead>
-                  <TableHead className="text-right">Registros</TableHead>
-                  <TableHead className="text-right">Importado em</TableHead>
-                  <TableHead className="w-12"></TableHead>
+    <Card>
+      <CardHeader>
+        <CardTitle>Arquivos importados ({uploads.length})</CardTitle>
+        <CardDescription>
+          Marque quais competências devem entrar no cálculo de produção vs meta. Médias mensais usam o número de
+          competências distintas selecionadas.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {uploads.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum arquivo importado ainda.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">Usar</TableHead>
+                <TableHead>Arquivo</TableHead>
+                <TableHead>Competência</TableHead>
+                <TableHead className="text-right">Registros</TableHead>
+                <TableHead className="text-right">Importado em</TableHead>
+                <TableHead className="w-12"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {uploads.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selectedUploadIds.includes(u.id)}
+                      onChange={() => toggleUpload(u.id)}
+                      className="h-4 w-4 accent-[color:var(--primary)]"
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{u.fileName}</TableCell>
+                  <TableCell><Badge variant="secondary">{u.competencia}</Badge></TableCell>
+                  <TableCell className="text-right">{fmt(u.recordCount)}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {new Date(u.uploadedAt).toLocaleString("pt-BR")}
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(u.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {uploads.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell>
-                      <input
-                        type="checkbox"
-                        checked={selectedUploadIds.includes(u.id)}
-                        onChange={() => toggleUpload(u.id)}
-                        className="h-4 w-4 accent-[color:var(--primary)]"
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{u.fileName}</TableCell>
-                    <TableCell><Badge variant="secondary">{u.competencia}</Badge></TableCell>
-                    <TableCell className="text-right">{fmt(u.recordCount)}</TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground">
-                      {new Date(u.uploadedAt).toLocaleString("pt-BR")}
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => removeUpload(u.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Campos lidos do .DBF</CardTitle>
-        </CardHeader>
-        <CardContent className="text-xs text-muted-foreground">
-          <p>
-            <strong>PRD_PA</strong> (código SIGTAP, 10 dígitos), <strong>PRD_CBO</strong> (ocupação),{" "}
-            <strong>PRD_QT_A</strong> (quantidade aprovada — usada como produção oficial),{" "}
-            <strong>PRD_QT_P</strong> (apresentada), <strong>PRD_VL_A</strong> (valor aprovado),{" "}
-            <strong>PRD_CMP</strong> (competência AAAAMM). Demais campos do layout SIA são ignorados nesta análise.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  );
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Campos lidos do .DBF</CardTitle>
+      </CardHeader>
+      <CardContent className="text-xs text-muted-foreground">
+        <p>
+          <strong>PRD_PA</strong> (código SIGTAP, 10 dígitos), <strong>PRD_CBO</strong> (ocupação),{" "}
+          <strong>PRD_QT_A</strong> (quantidade aprovada — usada como produção oficial),{" "}
+          <strong>PRD_QT_P</strong> (apresentada), <strong>PRD_VL_A</strong> (valor aprovado),{" "}
+          <strong>PRD_CMP</strong> (competência AAAAMM). Demais campos do layout SIA são ignorados nesta análise.
+        </p>
+      </CardContent>
+    </Card>
+  </div>
+);
 }
 
 /* ───────────────────────── REGRAS / PROCEDIMENTOS ───────────────────────── */
@@ -528,7 +577,7 @@ function RulesTab() {
         <AlertTitle>Sobre "DESCONTADO PT"</AlertTitle>
         <AlertDescription className="text-sm">
           Algumas regras descontam procedimentos contados em outros itens (PT1=ponto 1, etc.). O painel <strong>identifica
-          e sinaliza</strong> esses casos automaticamente, mas o cruzamento exato deve ser revisado por aqui — você pode
+            e sinaliza</strong> esses casos automaticamente, mas o cruzamento exato deve ser revisado por aqui — você pode
           editar manualmente quais códigos SIGTAP/CBO entram em cada procedimento para refletir a regra contratual.
         </AlertDescription>
       </Alert>
@@ -665,7 +714,7 @@ function ProductionTab() {
                 {rows.map((r) => {
                   const tone =
                     r.pct >= 95 ? "text-emerald-600" :
-                    r.pct >= 70 ? "text-amber-600" : "text-destructive";
+                      r.pct >= 70 ? "text-amber-600" : "text-destructive";
                   const Icon = r.pct >= 95 ? CheckCircle2 : AlertTriangle;
                   return (
                     <TableRow key={r.id}>
@@ -711,8 +760,8 @@ function DemandTab() {
   const base = showAll ? procedures : onlyReg;
   const list = filter
     ? procedures.filter(
-        (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
-      )
+      (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
+    )
     : base;
 
   const handleXlsx = async (file: File) => {
