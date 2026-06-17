@@ -733,6 +733,8 @@ function ProductionTab() {
 
 /* ───────────────────────── FILA & DEMANDA ───────────────────────── */
 
+/* ───────────────────────── FILA & DEMANDA ───────────────────────── */
+
 function DemandTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -800,6 +802,41 @@ function DemandTab() {
     }
   };
 
+  // --- EXPORTAÇÃO DA FILA ---
+  const handleExportFila = (format: "csv" | "xls") => {
+    const isCsv = format === "csv";
+    let content = isCsv
+      ? "ID,Procedimento,Fila Atual,Entrada/mes,Saida/mes,Capacidade/mes,Liquido\n"
+      : "<html><meta charset='utf-8'><body><table border='1'><tr><th>ID</th><th>Procedimento</th><th>Fila Atual</th><th>Entrada/mês</th><th>Saída/mês</th><th>Capacidade/mês</th><th>Líquido</th></tr>";
+
+    list.forEach((p) => {
+      const d = demand[p.id];
+      if (!d) return;
+      const totalOutflow = d.capacidadeMensal + d.saidaMensal;
+      const liquido = totalOutflow - d.entradaMensal;
+
+      if (isCsv) {
+        // Remove aspas duplas do nome para não quebrar o CSV
+        const safeName = p.name.replace(/"/g, "'");
+        content += `"${p.id}","${safeName}",${d.filaAtual},${d.entradaMensal},${d.saidaMensal},${d.capacidadeMensal},${liquido}\n`;
+      } else {
+        content += `<tr><td>${p.id}</td><td>${p.name}</td><td>${d.filaAtual}</td><td>${d.entradaMensal}</td><td>${d.saidaMensal}</td><td>${d.capacidadeMensal}</td><td>${liquido}</td></tr>`;
+      }
+    });
+
+    if (!isCsv) content += "</table></body></html>";
+
+    const mime = isCsv ? "text/csv;charset=utf-8;" : "application/vnd.ms-excel;charset=utf-8;";
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fila-demanda.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Lista de fila exportada em ${format.toUpperCase()} com sucesso!`);
+  };
+
   return (
     <div className="space-y-4">
       <Alert>
@@ -836,16 +873,37 @@ function DemandTab() {
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Filtrar por nome ou ID…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="max-w-sm"
-        />
-        <Button variant={showAll ? "default" : "outline"} size="sm" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "Mostrando os 55" : "Só REGSMS"}
-        </Button>
+      {/* BARRA DE FILTRO E EXPORTAÇÃO ALINHADA */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="Filtrar por nome ou ID…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="max-w-sm"
+          />
+          <Button variant={showAll ? "default" : "outline"} size="sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "Mostrando os 55" : "Só REGSMS"}
+          </Button>
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Download className="mr-2 h-4 w-4" />
+              Exportar Lista
+              <ChevronDown className="ml-2 h-3 w-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleExportFila("xls")} className="cursor-pointer">
+              <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" /> Planilha (.xls)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleExportFila("csv")} className="cursor-pointer">
+              <FileText className="mr-2 h-4 w-4 text-blue-600" /> Tabela (.csv)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <Card>
@@ -1139,20 +1197,20 @@ function ProjectionTab() {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaHospital} 
-                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
+              <Input
+                type="number"
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
+                value={d.metaPropostaHospital}
+                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })}
               />
             </div>
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaRegulacao} 
-                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
+              <Input
+                type="number"
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
+                value={d.metaPropostaRegulacao}
+                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })}
               />
             </div>
             <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
@@ -1179,32 +1237,32 @@ function ProjectionTab() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} 
-                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]} 
-                    labelFormatter={(label) => `Mês do Convênio: ${label}`} 
+                  <Tooltip
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]}
+                    labelFormatter={(label) => `Mês do Convênio: ${label}`}
                   />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                  
-                  <Line 
-                    type="monotone" 
-                    dataKey="filaAtual" 
-                    name="Contrato Atual (Status Quo)" 
-                    stroke="var(--muted-foreground)" 
-                    strokeWidth={2} 
-                    strokeDasharray="5 5" 
-                    dot={false} 
-                    activeDot={{ r: 4 }} 
+
+                  <Line
+                    type="monotone"
+                    dataKey="filaAtual"
+                    name="Contrato Atual (Status Quo)"
+                    stroke="var(--muted-foreground)"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    activeDot={{ r: 4 }}
                   />
-                  
-                  <Line 
-                    type="monotone" 
-                    dataKey="filaProposta" 
-                    name="Cenário Simulado" 
-                    stroke="var(--primary)" 
-                    strokeWidth={3} 
-                    dot={false} 
-                    activeDot={{ r: 6 }} 
+
+                  <Line
+                    type="monotone"
+                    dataKey="filaProposta"
+                    name="Cenário Simulado"
+                    stroke="var(--primary)"
+                    strokeWidth={3}
+                    dot={false}
+                    activeDot={{ r: 6 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1242,7 +1300,7 @@ function ProjectionTab() {
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
                 Previsão de Fila (Projeção)
               </div>
-              
+
               {isDeficit ? (
                 <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
                   <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
@@ -1337,9 +1395,9 @@ function ProjectionTab() {
                     const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
                     const difTot = difH + difR;
                     return (
-                      <TableRow 
-                        key={proc.id} 
-                        className="cursor-pointer hover:bg-muted/50" 
+                      <TableRow
+                        key={proc.id}
+                        className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(proc.id)}
                       >
                         <TableCell className="font-medium text-xs max-w-[300px] truncate" title={proc.name}>
