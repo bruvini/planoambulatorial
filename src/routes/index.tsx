@@ -4,6 +4,7 @@ import {
   Activity, Upload, ListChecks, BarChart3, Users2, TrendingUp,
   FileSpreadsheet, Trash2, AlertTriangle, CheckCircle2, Info,
   Calculator, RotateCcw, Download, Cloud, CloudDownload, CloudUpload,
+  ChevronDown, FileText, Image, Printer
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -26,6 +27,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import { parseDbfFile, type DbfRow } from "@/lib/dbf-parser";
 import { aggregateProduction, projectQueue, monthsToZero } from "@/lib/analytics";
@@ -939,10 +943,6 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
-/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
-
-/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
-
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -1010,7 +1010,6 @@ function ProjectionTab() {
     return (val > 0 ? "+" : "") + val.toFixed(1) + "%";
   };
 
-  // Lógica da previsão corrigida: o risco real é a vazão ser menor que a entrada
   const isDeficit = proposedOutflow < d.entradaMensal;
 
   // --- RESUMO DE ALTERAÇÕES E RESET ---
@@ -1031,6 +1030,46 @@ function ProjectionTab() {
     toast.success("Todas as simulações foram restauradas para o contrato original.");
   };
 
+  // --- EXPORTAÇÃO NATIVA (Fricção Zero) ---
+  const handleExport = (format: "csv" | "xls" | "pdf" | "png") => {
+    if (format === "csv" || format === "xls") {
+      const isCsv = format === "csv";
+      let content = isCsv
+        ? "Procedimento,Hospital Atual,Hospital Proposto,Regulacao Atual,Regulacao Proposta,Impacto Mensal\n"
+        : "<html><meta charset='utf-8'><body><table border='1'><tr><th>Procedimento</th><th>Hospital Atual</th><th>Hospital Proposto</th><th>Regulação Atual</th><th>Regulação Proposta</th><th>Impacto Mensal</th></tr>";
+
+      changedList.forEach((proc) => {
+        const dem = demand[proc.id];
+        const difH = dem.metaPropostaHospital - proc.metaHospital;
+        const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
+        const difTot = difH + difR;
+
+        if (isCsv) {
+          content += `"${proc.id} - ${proc.name}",${proc.metaHospital},${dem.metaPropostaHospital},${proc.metaRegulacao},${dem.metaPropostaRegulacao},${difTot}\n`;
+        } else {
+          content += `<tr><td>${proc.id} - ${proc.name}</td><td>${proc.metaHospital}</td><td>${dem.metaPropostaHospital}</td><td>${proc.metaRegulacao}</td><td>${dem.metaPropostaRegulacao}</td><td>${difTot}</td></tr>`;
+        }
+      });
+
+      if (!isCsv) content += "</table></body></html>";
+
+      const mime = isCsv ? "text/csv;charset=utf-8;" : "application/vnd.ms-excel;charset=utf-8;";
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resumo-simulacoes.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Resumo exportado em ${format.toUpperCase()} com sucesso!`);
+    } else if (format === "pdf") {
+      toast.info("Na tela de impressão que vai abrir, altere o Destino para 'Salvar como PDF'.");
+      setTimeout(() => window.print(), 800);
+    } else if (format === "png") {
+      toast.info("Dica: Utilize a ferramenta nativa de captura (Windows+Shift+S ou Cmd+Shift+4) para recortar o resumo com perfeição na sua tela!");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Alert>
@@ -1041,7 +1080,7 @@ function ProjectionTab() {
         </AlertDescription>
       </Alert>
 
-      {/* SELETOR DE PROCEDIMENTO */}
+      {/* SELETOR DE PROCEDIMENTO (FILTRADO APENAS PARA REGSMS) */}
       <Card>
         <CardContent className="pt-6">
           <select
@@ -1049,9 +1088,11 @@ function ProjectionTab() {
             onChange={(e) => setSelectedId(e.target.value)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-medium"
           >
-            {procedures.map((proc) => (
-              <option key={proc.id} value={proc.id}>{proc.id} — {proc.name}</option>
-            ))}
+            {procedures
+              .filter((proc) => proc.tipo.includes("REGSMS"))
+              .map((proc) => (
+                <option key={proc.id} value={proc.id}>{proc.id} — {proc.name}</option>
+              ))}
           </select>
         </CardContent>
       </Card>
@@ -1098,20 +1139,20 @@ function ProjectionTab() {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
-              <Input
-                type="number"
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
-                value={d.metaPropostaHospital}
-                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })}
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaHospital} 
+                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
               />
             </div>
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
-              <Input
-                type="number"
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
-                value={d.metaPropostaRegulacao}
-                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })}
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaRegulacao} 
+                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
               />
             </div>
             <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
@@ -1138,32 +1179,32 @@ function ProjectionTab() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]}
-                    labelFormatter={(label) => `Mês do Convênio: ${label}`}
+                  <Tooltip 
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} 
+                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]} 
+                    labelFormatter={(label) => `Mês do Convênio: ${label}`} 
                   />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-
-                  <Line
-                    type="monotone"
-                    dataKey="filaAtual"
-                    name="Contrato Atual (Status Quo)"
-                    stroke="var(--muted-foreground)"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    activeDot={{ r: 4 }}
+                  
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaAtual" 
+                    name="Contrato Atual (Status Quo)" 
+                    stroke="var(--muted-foreground)" 
+                    strokeWidth={2} 
+                    strokeDasharray="5 5" 
+                    dot={false} 
+                    activeDot={{ r: 4 }} 
                   />
-
-                  <Line
-                    type="monotone"
-                    dataKey="filaProposta"
-                    name="Cenário Simulado"
-                    stroke="var(--primary)"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 6 }}
+                  
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaProposta" 
+                    name="Cenário Simulado" 
+                    stroke="var(--primary)" 
+                    strokeWidth={3} 
+                    dot={false} 
+                    activeDot={{ r: 6 }} 
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1201,7 +1242,7 @@ function ProjectionTab() {
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
                 Previsão de Fila (Projeção)
               </div>
-
+              
               {isDeficit ? (
                 <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
                   <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
@@ -1239,17 +1280,43 @@ function ProjectionTab() {
         {/* LISTA DE ALTERAÇÕES - Só aparece se algo foi modificado */}
         {changedList.length > 0 && (
           <Card className="lg:col-span-3 border-primary/20 bg-muted/10">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 gap-4">
               <div>
                 <CardTitle className="text-base">Resumo das Simulações (Deltas)</CardTitle>
                 <CardDescription>
                   Abaixo estão todos os procedimentos cujas propostas diferem do contrato atual.
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={handleResetAll}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Restaurar Originais
-              </Button>
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Download className="mr-2 h-4 w-4" />
+                      Exportar
+                      <ChevronDown className="ml-2 h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleExport("xls")} className="cursor-pointer">
+                      <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" /> Planilha (.xls)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("csv")} className="cursor-pointer">
+                      <FileText className="mr-2 h-4 w-4 text-blue-600" /> Tabela (.csv)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer">
+                      <Printer className="mr-2 h-4 w-4" /> Salvar como PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport("png")} className="cursor-pointer">
+                      <Image className="mr-2 h-4 w-4 text-purple-600" /> Salvar como PNG
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button variant="outline" size="sm" onClick={handleResetAll} className="text-destructive hover:text-destructive">
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Restaurar Originais
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
@@ -1270,9 +1337,9 @@ function ProjectionTab() {
                     const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
                     const difTot = difH + difR;
                     return (
-                      <TableRow
-                        key={proc.id}
-                        className="cursor-pointer hover:bg-muted/50"
+                      <TableRow 
+                        key={proc.id} 
+                        className="cursor-pointer hover:bg-muted/50" 
                         onClick={() => setSelectedId(proc.id)}
                       >
                         <TableCell className="font-medium text-xs max-w-[300px] truncate" title={proc.name}>
