@@ -1,12 +1,6 @@
 import type { Procedure } from "./procedures-data";
 import type { DbfRow } from "./dbf-parser";
 
-// Match a single record to a procedure rule.
-// Logic:
-//  - If procedure has SIGTAP codes list → match by PRD_PA in list
-//  - Otherwise if it has grupo/subgrupo → match by code prefix (positions 1-2 = grupo, 3-4 = subgrupo, 5-6 = forma)
-//  - If procedure has CBO list → also require PRD_CBO in list
-//  - Note: "DESCONTADO PTx" rules are informative; user adjusts manually in the UI.
 export function rowMatchesProcedure(row: DbfRow, p: Procedure): boolean {
   const pa = String(row.PRD_PA ?? "").padStart(10, "0");
   const cbo = String(row.PRD_CBO ?? "").trim();
@@ -28,8 +22,8 @@ export function rowMatchesProcedure(row: DbfRow, p: Procedure): boolean {
 
 export type ProductionRow = {
   procedureId: string;
-  produced: number; // sum of PRD_QT_A (approved)
-  presented: number; // sum of PRD_QT_P
+  produced: number;
+  presented: number;
   valueApproved: number;
   records: number;
 };
@@ -54,29 +48,41 @@ export function aggregateProduction(
   return map;
 }
 
-// 60-month queue projection.
-// queue: current backlog; monthlyIntake: new patients/month; capacity: monthly hospital throughput
-// Returns array of {month, queue, served, backlog}
+/**
+ * Projeção da fila ao longo de N meses, considerando entrada (novos pedidos)
+ * e saída total mensal (capacidade proposta + saídas externas históricas, p.ex.
+ * transferências, abandono, óbito). A saída efetiva nunca passa do tamanho da
+ * fila disponível no mês.
+ */
 export function projectQueue(opts: {
   initialQueue: number;
   monthlyIntake: number;
-  capacity: number;
+  monthlyExits?: number; // vazão "outra" — independente da meta proposta
+  capacity: number;       // meta proposta hospital + regulação
   months?: number;
 }) {
   const months = opts.months ?? 60;
-  const out: { month: number; queue: number; served: number; intake: number }[] = [];
+  const exits = opts.monthlyExits ?? 0;
+  const out: {
+    month: number;
+    queue: number;
+    served: number;     // atendidos pela meta proposta
+    otherExits: number; // demais saídas (transferência, abandono, óbito…)
+    intake: number;
+  }[] = [];
   let q = opts.initialQueue;
   for (let m = 1; m <= months; m++) {
     q += opts.monthlyIntake;
     const served = Math.min(q, opts.capacity);
     q -= served;
-    out.push({ month: m, queue: q, served, intake: opts.monthlyIntake });
+    const otherExits = Math.min(q, exits);
+    q -= otherExits;
+    out.push({ month: m, queue: q, served, otherExits, intake: opts.monthlyIntake });
   }
   return out;
 }
 
-// Time-to-zero queue (months); -1 if never
-export function monthsToZero(initialQueue: number, monthlyIntake: number, capacity: number) {
-  if (capacity <= monthlyIntake) return -1;
-  return Math.ceil(initialQueue / (capacity - monthlyIntake));
+export function monthsToZero(initialQueue: number, monthlyIntake: number, totalOutflow: number) {
+  if (totalOutflow <= monthlyIntake) return -1;
+  return Math.ceil(initialQueue / (totalOutflow - monthlyIntake));
 }
