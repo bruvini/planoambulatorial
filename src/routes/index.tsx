@@ -1003,6 +1003,8 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
+/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
+
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -1029,29 +1031,37 @@ function ProjectionTab() {
     ? prodMap[selectedId].valueApproved / prodMap[selectedId].produced 
     : 0;
 
-  // --- CENÁRIO 1: STATUS QUO (Contrato Atual) ---
+  // ----------------------------------------------------------------------
+  // CORREÇÃO DO MOTOR DA FILA: EVITANDO DUPLA CONTAGEM
+  // A saída média do SISREG (d.saidaMensal) já inclui o que NÓS atendemos hoje.
+  // "Outras saídas" = pessoas que foram para outros hospitais, desistiram ou faleceram.
+  // ----------------------------------------------------------------------
   const currentTotalCapacity = p.metaHospital + p.metaRegulacao;
   const currentRegCapacity = p.metaRegulacao; 
-  const currentOutflow = currentRegCapacity + d.saidaMensal; // APENAS REGULAÇÃO IMPACTA A FILA
+  
+  const baseOtherExits = Math.max(0, d.saidaMensal - currentRegCapacity);
+
+  // --- CENÁRIO 1: STATUS QUO (Contrato Atual) ---
+  const currentOutflow = currentRegCapacity + baseOtherExits; // Equivalente à Saída SISREG real
   const mZeroCurrent = monthsToZero(d.filaAtual, d.entradaMensal, currentOutflow);
   const projCurrent = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
-    monthlyExits: d.saidaMensal,
-    capacity: currentRegCapacity, // Passa apenas a regulação
+    monthlyExits: baseOtherExits, // Passamos apenas as "outras saídas"
+    capacity: currentRegCapacity, // Passamos apenas a regulação
     months: 60,
   });
 
   // --- CENÁRIO 2: PROPOSTA (Valores Simulados) ---
   const proposedTotalCapacity = d.metaPropostaHospital + d.metaPropostaRegulacao;
   const proposedRegCapacity = d.metaPropostaRegulacao;
-  const proposedOutflow = proposedRegCapacity + d.saidaMensal; // APENAS REGULAÇÃO IMPACTA A FILA
+  const proposedOutflow = proposedRegCapacity + baseOtherExits; // Apenas regulação mexe na fila
   const mZeroProposed = monthsToZero(d.filaAtual, d.entradaMensal, proposedOutflow);
   const projProposed = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
-    monthlyExits: d.saidaMensal,
-    capacity: proposedRegCapacity, // Passa apenas a regulação
+    monthlyExits: baseOtherExits,
+    capacity: proposedRegCapacity,
     months: 60,
   });
 
@@ -1081,6 +1091,7 @@ function ProjectionTab() {
     return (val > 0 ? "+" : "") + val.toFixed(1) + "%";
   };
 
+  // O déficit é calculado considerando todas as forças do município (nós + outros)
   const isDeficit = proposedOutflow < d.entradaMensal;
 
   // --- RESUMO DE ALTERAÇÕES E RESET ---
@@ -1101,7 +1112,7 @@ function ProjectionTab() {
     toast.success("Todas as simulações foram restauradas para o contrato original.");
   };
 
-  // --- EXPORTAÇÃO NATIVA (Incluindo Financeiro) ---
+  // --- EXPORTAÇÃO NATIVA ---
   const handleExport = (format: "csv" | "xls" | "pdf" | "png") => {
     if (format === "csv" || format === "xls") {
       const isCsv = format === "csv";
@@ -1177,15 +1188,15 @@ function ProjectionTab() {
         <Card className="flex flex-col justify-between">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Demanda de Regulação
+              Demanda Municipal (SISREG)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <Row k="Fila externa atual" v={fmt(d.filaAtual)} />
             <Row k="Entrada nova/mês" v={fmt(d.entradaMensal, 1)} />
-            <Row k="Saída externa/mês" v={fmt(d.saidaMensal, 1)} />
+            <Row k="Saída total (Rede)/mês" v={fmt(d.saidaMensal, 1)} />
             <div className="pt-2 border-t border-border">
-              <Row k="Produção total real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
+              <Row k="Nossa produção média real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
             </div>
           </CardContent>
         </Card>
@@ -1211,28 +1222,41 @@ function ProjectionTab() {
               Cenário Simulado
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between gap-4">
-              <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaHospital} 
-                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
-              />
+          <CardContent className="space-y-3 flex flex-col justify-between h-full">
+            <div className="space-y-4 mt-1">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
+                <Input 
+                  type="number" 
+                  className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                  value={d.metaPropostaHospital} 
+                  onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
+                <Input 
+                  type="number" 
+                  className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                  value={d.metaPropostaRegulacao} 
+                  onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-4">
-              <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaRegulacao} 
-                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
-              />
-            </div>
-            <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
-              <span className="text-primary/80">Total Físico Simulado</span>
-              <span className="text-primary">{fmt(proposedTotalCapacity)}</span>
+            
+            <div className="pt-3 border-t border-primary/20 flex flex-col gap-1.5">
+              <div className="flex justify-between font-semibold text-sm">
+                <span className="text-primary/80">Nossa Oferta Total</span>
+                <span className="text-primary">{fmt(proposedTotalCapacity)}</span>
+              </div>
+              
+              {/* ALERTA CRÍTICO DE DÉFICIT DA FILA MUNICIPAL */}
+              <div className="flex justify-between text-[11px] items-center bg-background/50 rounded p-1.5">
+                <span className="text-muted-foreground font-medium leading-tight">Vazão Fila (Regulação + HMSJ) <br/>vs Entrada Mensal</span>
+                <span className={`px-2 py-0.5 rounded font-bold ${proposedOutflow < d.entradaMensal ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-600"}`}>
+                  {fmt(proposedOutflow, 1)} / {fmt(d.entradaMensal, 1)}
+                </span>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1347,14 +1371,14 @@ function ProjectionTab() {
                 <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
                   <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Risco Crítico! A vazão de regulação ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
+                    Risco Crítico! A vazão simulada da fila ({fmt(proposedOutflow, 1)}/mês) é menor que a entrada municipal ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar.
                   </p>
                 </div>
               ) : mZeroProposed === 0 ? (
                 <div className="flex items-start gap-2 bg-blue-500/20 p-3 rounded-md border border-blue-400/30 text-blue-50">
                   <CheckCircle2 className="h-5 w-5 text-blue-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Fluxo Equilibrado! A fila atual já está zerada e a vazão proposta da regulação ({fmt(proposedOutflow)}/mês) cobre as entradas.
+                    Fluxo Equilibrado! A fila atual já está zerada e a vazão proposta cobre perfeitamente as novas entradas.
                   </p>
                 </div>
               ) : mZeroProposed <= 60 ? (
@@ -1362,6 +1386,7 @@ function ProjectionTab() {
                   <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
                     Com a regulação simulada, a demanda externa zera no <strong>mês {mZeroProposed}</strong> do contrato.
+                    {mZeroCurrent === -1 && <span className="opacity-80 block mt-1">Lembrando que no Status Quo a fila não zera.</span>}
                   </p>
                 </div>
               ) : (
