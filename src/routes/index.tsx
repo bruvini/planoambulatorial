@@ -957,24 +957,30 @@ function ProjectionTab() {
   const d = demand[selectedId];
 
   const prodMensalReal = months > 0 ? (prodMap[selectedId]?.produced ?? 0) / months : 0;
+  const capacidadeProposta = d.metaPropostaHospital + d.metaPropostaRegulacao;
   const proj = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
-    capacity: d.metaPropostaHospital + d.metaPropostaRegulacao,
+    monthlyExits: d.saidaMensal,
+    capacity: capacidadeProposta,
     months: 60,
   });
-  const mZero = monthsToZero(d.filaAtual, d.entradaMensal, d.metaPropostaHospital + d.metaPropostaRegulacao);
+  const totalOutflow = capacidadeProposta + d.saidaMensal;
+  const mZero = monthsToZero(d.filaAtual, d.entradaMensal, totalOutflow);
 
   // Summary across all REGSMS procedures
   const summary = procedures.filter(x => x.tipo.includes("REGSMS")).map((x) => {
     const dd = demand[x.id];
     const cap = dd.metaPropostaHospital + dd.metaPropostaRegulacao;
-    const m = monthsToZero(dd.filaAtual, dd.entradaMensal, cap);
+    const outflow = cap + dd.saidaMensal;
+    const m = monthsToZero(dd.filaAtual, dd.entradaMensal, outflow);
     return {
-      id: x.id, name: x.name, fila: dd.filaAtual, entrada: dd.entradaMensal, cap,
-      mZero: m, atendeDemanda: cap >= dd.entradaMensal,
+      id: x.id, name: x.name, fila: dd.filaAtual, entrada: dd.entradaMensal,
+      saida: dd.saidaMensal, cap, outflow,
+      mZero: m, atendeDemanda: outflow >= dd.entradaMensal,
     };
   });
+
 
   return (
     <div className="space-y-6">
