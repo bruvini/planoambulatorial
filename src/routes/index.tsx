@@ -934,6 +934,8 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
+/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
+
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -953,118 +955,262 @@ function ProjectionTab() {
   const d = demand[selectedId];
 
   const prodMensalReal = months > 0 ? (prodMap[selectedId]?.produced ?? 0) / months : 0;
-  const capacidadeProposta = d.metaPropostaHospital + d.metaPropostaRegulacao;
-  const proj = projectQueue({
+
+  // --- CENÁRIO 1: STATUS QUO (Contrato Atual) ---
+  const currentCapacity = p.metaTotal;
+  const currentOutflow = currentCapacity + d.saidaMensal;
+  const mZeroCurrent = monthsToZero(d.filaAtual, d.entradaMensal, currentOutflow);
+  const projCurrent = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
     monthlyExits: d.saidaMensal,
-    capacity: capacidadeProposta,
+    capacity: currentCapacity,
     months: 60,
   });
-  const totalOutflow = capacidadeProposta + d.saidaMensal;
-  const mZero = monthsToZero(d.filaAtual, d.entradaMensal, totalOutflow);
 
-  const summary = procedures.filter(x => x.tipo.includes("REGSMS")).map((x) => {
-    const dd = demand[x.id];
-    const cap = dd.metaPropostaHospital + dd.metaPropostaRegulacao;
-    const outflow = cap + dd.saidaMensal;
-    const m = monthsToZero(dd.filaAtual, dd.entradaMensal, outflow);
-    return {
-      id: x.id, name: x.name, fila: dd.filaAtual, entrada: dd.entradaMensal,
-      saida: dd.saidaMensal, cap, outflow,
-      mZero: m, atendeDemanda: outflow >= dd.entradaMensal,
-    };
+  // --- CENÁRIO 2: PROPOSTA (Valores Simulados) ---
+  const proposedCapacity = d.metaPropostaHospital + d.metaPropostaRegulacao;
+  const proposedOutflow = proposedCapacity + d.saidaMensal;
+  const mZeroProposed = monthsToZero(d.filaAtual, d.entradaMensal, proposedOutflow);
+  const projProposed = projectQueue({
+    initialQueue: d.filaAtual,
+    monthlyIntake: d.entradaMensal,
+    monthlyExits: d.saidaMensal,
+    capacity: proposedCapacity,
+    months: 60,
   });
+
+  // --- DADOS PARA O GRÁFICO (Mescla as duas linhas) ---
+  const chartData = projCurrent.map((curr, idx) => ({
+    month: curr.month,
+    filaAtual: curr.queue,
+    filaProposta: projProposed[idx]?.queue ?? 0,
+  }));
+
+  // --- CÁLCULOS DE DELTA PARA O RELATÓRIO ---
+  const diffHosp = d.metaPropostaHospital - p.metaHospital;
+  const pctHosp = p.metaHospital > 0 ? (diffHosp / p.metaHospital) * 100 : (diffHosp > 0 ? 100 : 0);
+
+  const diffReg = d.metaPropostaRegulacao - p.metaRegulacao;
+  const pctReg = p.metaRegulacao > 0 ? (diffReg / p.metaRegulacao) * 100 : (diffReg > 0 ? 100 : 0);
+
+  const diffTotal = proposedCapacity - currentCapacity;
+  const pctTotal = currentCapacity > 0 ? (diffTotal / currentCapacity) * 100 : (diffTotal > 0 ? 100 : 0);
+
+  const formatPct = (val: number) => {
+    if (val === 0) return "0%";
+    return (val > 0 ? "+" : "") + val.toFixed(1) + "%";
+  };
 
   return (
     <div className="space-y-6">
       <Alert>
-        <Calculator className="h-4 w-4" />
-        <AlertTitle>Simulador de proposta de metas — convênio 60 meses</AlertTitle>
+        <TrendingUp className="h-4 w-4" />
+        <AlertTitle>Painel de Negociação — Cenário 60 Meses</AlertTitle>
         <AlertDescription className="text-sm">
-          Ajuste as metas mensais de hospital e regulação para o procedimento selecionado e veja a evolução ao longo de 60 meses.
+          Selecione um procedimento abaixo para comparar a trajetória da fila mantendo o <strong>Status Quo</strong> (contrato atual) versus o <strong>Cenário Simulado</strong>. Ajuste os valores propostos na tabela para encontrar o equilíbrio que permita zerar a demanda reprimida.
         </AlertDescription>
       </Alert>
 
+      {/* SELETOR DE PROCEDIMENTO */}
       <Card>
-        <CardHeader>
-          <CardTitle>Procedimento</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <select
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-medium"
           >
-            {procedures.map((p) => (
-              <option key={p.id} value={p.id}>{p.id} — {p.name}</option>
+            {procedures.map((proc) => (
+              <option key={proc.id} value={proc.id}>{proc.id} — {proc.name}</option>
             ))}
           </select>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Dados atuais</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <Row k="Meta contratual total" v={`${fmt(p.metaTotal)}/mês`} />
-            <Row k="Meta regulação contratual" v={`${fmt(p.metaRegulacao)}/mês`} />
-            <Row k="Produção média real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
+      {/* BLOCOS DE DADOS E INPUTS DE SIMULAÇÃO */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card className="flex flex-col justify-between">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Demanda e Histórico
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
             <Row k="Fila atual" v={fmt(d.filaAtual)} />
             <Row k="Entrada nova/mês" v={fmt(d.entradaMensal, 1)} />
-            <Row k="Saída média/mês" v={fmt(d.saidaMensal, 1)} />
+            <Row k="Saída externa/mês" v={fmt(d.saidaMensal, 1)} />
+            <div className="pt-2 border-t border-border">
+              <Row k="Produção média real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Proposta hospital (PS-AMB)</CardTitle></CardHeader>
-          <CardContent>
-            <Label className="text-xs">Meta mensal hospital</Label>
-            <Input type="number" value={d.metaPropostaHospital} onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} />
+        <Card className="border-muted bg-muted/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Contrato Atual (Status Quo)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Row k="Hospital (PS-AMB)" v={fmt(p.metaHospital)} />
+            <Row k="Regulação (REGSMS)" v={fmt(p.metaRegulacao)} />
+            <div className="pt-2 border-t border-border font-medium text-foreground">
+              <Row k="Vazão Contratual Mensal" v={fmt(currentCapacity)} />
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Proposta regulação (REGSMS)</CardTitle></CardHeader>
-          <CardContent>
-            <Label className="text-xs">Meta mensal regulada</Label>
-            <Input type="number" value={d.metaPropostaRegulacao} onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} />
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold text-primary uppercase tracking-wider">
+              Cenário Simulado
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaHospital} 
+                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaRegulacao} 
+                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
+              />
+            </div>
+            <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
+              <span className="text-primary/80">Vazão Total Simulada</span>
+              <span className="text-primary">{fmt(proposedCapacity)}</span>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Evolução projetada da fila — 60 meses</CardTitle>
-          <CardDescription>
-            {mZero > 0 ? <>Fila zera em aproximadamente <strong>{mZero} meses</strong>.</> : <span className="text-destructive">vazão insuficiente — fila cresce indefinidamente.</span>}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[340px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={proj}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} formatter={(v: number) => fmt(v)} />
-                <Legend />
-                <Line type="monotone" dataKey="queue" name="Fila acumulada" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="served" name="Atendidos (meta proposta)" stroke="var(--chart-4)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="otherExits" name="Outras saídas" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="intake" name="Entradas no mês" stroke="var(--chart-3)" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* GRÁFICO (Ocupa 2/3 do espaço) */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Trajetória da Fila de Espera</CardTitle>
+            <CardDescription>
+              Comparativo visual entre não alterar o contrato (linha cinza tracejada) e adotar os números da simulação (linha colorida sólida).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <Tooltip 
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} 
+                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]} 
+                    labelFormatter={(label) => `Mês do Convênio: ${label}`} 
+                  />
+                  <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
+                  
+                  {/* Linha Antiga (Cinza e Tracejada) */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaAtual" 
+                    name="Contrato Atual (Status Quo)" 
+                    stroke="var(--muted-foreground)" 
+                    strokeWidth={2} 
+                    strokeDasharray="5 5" 
+                    dot={false} 
+                    activeDot={{ r: 4 }} 
+                  />
+                  
+                  {/* Linha Nova (Sólida e Destacada) */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaProposta" 
+                    name="Cenário Simulado" 
+                    stroke="var(--primary)" 
+                    strokeWidth={3} 
+                    dot={false} 
+                    activeDot={{ r: 6 }} 
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* RELATÓRIO EXECUTIVO (Ocupa 1/3 do espaço) */}
+        <Card className="bg-primary text-primary-foreground flex flex-col shadow-md">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Relatório Executivo</CardTitle>
+            <CardDescription className="text-primary-foreground/80">
+              Resumo da simulação para apresentação
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex-1 space-y-5 text-sm">
+            {/* Impacto nas Metas */}
+            <div>
+              <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
+                Impacto Operacional (Agendas)
+              </div>
+              <ul className="space-y-2 border-l-2 border-primary-foreground/20 pl-3">
+                <li>
+                  <span className="opacity-80">Hospital:</span> de {fmt(p.metaHospital)} para <strong>{fmt(d.metaPropostaHospital)}</strong> ({formatPct(pctHosp)})
+                </li>
+                <li>
+                  <span className="opacity-80">Regulação:</span> de {fmt(p.metaRegulacao)} para <strong>{fmt(d.metaPropostaRegulacao)}</strong> ({formatPct(pctReg)})
+                </li>
+                <li className="pt-2 mt-2 border-t border-primary-foreground/20 font-medium">
+                  Oferta Total: de {fmt(currentCapacity)} para {fmt(proposedCapacity)} ({formatPct(pctTotal)})
+                </li>
+              </ul>
+            </div>
+
+            {/* Impacto na Fila (Cor Dinâmica com base no resultado) */}
+            <div className="pt-2">
+              <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
+                Previsão de Fila (Projeção)
+              </div>
+              
+              {mZeroProposed > 0 && mZeroProposed <= 60 ? (
+                <div className="flex items-start gap-2 bg-emerald-500/20 p-3 rounded-md border border-emerald-400/30 text-emerald-50">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
+                  <p className="leading-snug">
+                    Com a simulação proposta, a demanda reprimida será zerada no <strong>mês {mZeroProposed}</strong> do contrato.
+                    {mZeroCurrent === -1 && <span className="opacity-80 block mt-1">Lembrando que no Status Quo a fila cresce sem previsão de zerar.</span>}
+                  </p>
+                </div>
+              ) : mZeroProposed > 60 ? (
+                <div className="flex items-start gap-2 bg-amber-500/20 p-3 rounded-md border border-amber-400/30 text-amber-50">
+                  <AlertTriangle className="h-5 w-5 text-amber-300 mt-0.5 shrink-0" />
+                  <p className="leading-snug">
+                    Atenção: A fila levará <strong>mais de 60 meses</strong> para zerar ({mZeroProposed} meses). O aumento proposto é insuficiente para a vigência deste convênio.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
+                  <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
+                  <p className="leading-snug">
+                    Risco Crítico! A vazão simulada ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
+                  </p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between border-b border-border/60 pb-1 last:border-0">
+    <div className="flex justify-between border-b border-border/60 pb-1.5 last:border-0">
       <span className="text-muted-foreground">{k}</span>
       <span className="font-mono">{v}</span>
     </div>
