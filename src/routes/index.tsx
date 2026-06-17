@@ -1,5 +1,4 @@
-import { saveUploadToCloud, deleteUploadFromCloud, loadUploadsFromCloud } from "@/lib/upload-sync";
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity, Upload, ListChecks, BarChart3, Users2, TrendingUp,
@@ -34,7 +33,7 @@ import { useStore, type DbfUpload } from "@/lib/store";
 import type { Procedure } from "@/lib/procedures-data";
 import { parseFilaXlsx } from "@/lib/fila-xlsx";
 import { saveDemandToCloud, loadDemandFromCloud } from "@/lib/demand-sync";
-
+import { saveUploadToCloud, deleteUploadFromCloud, loadUploadsFromCloud } from "@/lib/upload-sync";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -87,22 +86,17 @@ function Dashboard() {
   useEffect(() => {
     async function bootstrapCloudData() {
       try {
-        // 1. Carrega os uploads do TABWIN (.DBF) de forma automática
         const cloudUploads = await loadUploadsFromCloud();
         if (cloudUploads && cloudUploads.length > 0) {
           setUploadsBulk(cloudUploads);
         }
 
-        // 2. Aproveita para carregar também os dados de Demanda/Fila salvos na nuvem
         const cloudDemand = await loadDemandFromCloud();
         if (cloudDemand && Object.keys(cloudDemand).length > 0) {
           setDemandBulk(cloudDemand);
         }
-
-        toast.success("Painel sincronizado com o Supabase com sucesso!");
       } catch (error) {
         console.error("Falha na inicialização dos dados da nuvem:", error);
-        toast.error("Aviso: Não foi possível sincronizar os dados com a nuvem.");
       }
     }
 
@@ -133,7 +127,7 @@ function Dashboard() {
         </Tabs>
       </main>
       <footer className="mx-auto max-w-[1400px] px-4 pb-8 pt-2 text-xs text-muted-foreground lg:px-8">
-        Painel HMSJ · Estudo de Projeção Ambulatorial · Sincronizado automaticamente com a nuvem.
+        Painel HMSJ · Estudo de Produção Ambulatorial · Sincronizado automaticamente com a nuvem.
       </footer>
     </div>
   );
@@ -317,8 +311,6 @@ function UploadTab() {
             toast.error(`${file.name}: não é um arquivo de Produção Ambulatorial SIA (campo PRD_PA ausente).`);
             continue;
           }
-
-          // Determine competência
           const cmpCount: Record<string, number> = {};
           for (const r of dbf.rows) {
             const k = String(r.PRD_CMP ?? "").trim();
@@ -331,7 +323,6 @@ function UploadTab() {
           agg.forEach((v, k) => {
             production[k] = { produced: v.produced, presented: v.presented, valueApproved: v.valueApproved, records: v.records };
           });
-
           const upload: DbfUpload = {
             id: crypto.randomUUID(),
             fileName: file.name,
@@ -340,12 +331,10 @@ function UploadTab() {
             uploadedAt: new Date().toISOString(),
             production,
           };
-
-          // 1. Salva na nuvem (Supabase)
+          
           await saveUploadToCloud(upload);
-
-          // 2. Salva localmente (Zustand)
           addUpload(upload);
+          
           toast.success(`${file.name} salvo na nuvem — ${fmt(dbf.recordCount)} registros · competência ${competencia}.`);
         } catch (e: any) {
           console.error(e);
@@ -358,7 +347,6 @@ function UploadTab() {
     }
   }
 
-  // Função para deletar da nuvem e do Zustand
   async function handleDelete(id: string) {
     try {
       await deleteUploadFromCloud(id);
@@ -369,115 +357,99 @@ function UploadTab() {
       toast.error("Erro ao remover arquivo da nuvem.");
     }
   }
-}
 
-return (
-  <div className="space-y-6">
-    <Card>
-      <CardHeader>
-        <CardTitle>Importar arquivos do TABWIN (.DBF)</CardTitle>
-        <CardDescription>
-          Selecione um ou mais arquivos <code>.dbf</code> de Produção Ambulatorial SIA/SUS. O parsing é feito
-          integralmente no navegador — nenhum dado é enviado a servidores. Cada arquivo é consolidado por
-          competência (PRD_CMP) e cruzado automaticamente com os 55 procedimentos do convênio.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div
-          className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 p-10 text-center transition hover:border-primary/50"
-          onDragOver={(e) => { e.preventDefault(); }}
-          onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-        >
-          <FileSpreadsheet className="h-10 w-10 text-primary" />
-          <div>
-            <p className="font-medium">Arraste arquivos .DBF aqui ou clique para selecionar</p>
-            <p className="text-xs text-muted-foreground">
-              Aceita múltiplos arquivos. Identifica campos PRD_PA, PRD_CBO, PRD_QT_A, PRD_CMP automaticamente.
-            </p>
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Importar arquivos do TABWIN (.DBF)</CardTitle>
+          <CardDescription>
+            Selecione um ou mais arquivos <code>.dbf</code> de Produção Ambulatorial SIA/SUS. O parsing é feito
+            integralmente no navegador — nenhum dado é enviado a servidores de terceiros.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div
+            className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 p-10 text-center transition hover:border-primary/50"
+            onDragOver={(e) => { e.preventDefault(); }}
+            onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+          >
+            <FileSpreadsheet className="h-10 w-10 text-primary" />
+            <div>
+              <p className="font-medium">Arraste arquivos .DBF aqui ou clique para selecionar</p>
+              <p className="text-xs text-muted-foreground">
+                Aceita múltiplos arquivos. Identifica campos PRD_PA, PRD_CBO, PRD_QT_A, PRD_CMP automaticamente.
+              </p>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".dbf,application/x-dbf"
+              multiple
+              onChange={(e) => handleFiles(e.target.files)}
+              className="hidden"
+            />
+            <Button onClick={() => fileRef.current?.click()} disabled={busy}>
+              {busy ? "Processando…" : "Selecionar arquivos .DBF"}
+            </Button>
           </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".dbf,application/x-dbf"
-            multiple
-            onChange={(e) => handleFiles(e.target.files)}
-            className="hidden"
-          />
-          <Button onClick={() => fileRef.current?.click()} disabled={busy}>
-            {busy ? "Processando…" : "Selecionar arquivos .DBF"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Arquivos importados ({uploads.length})</CardTitle>
-        <CardDescription>
-          Marque quais competências devem entrar no cálculo de produção vs meta. Médias mensais usam o número de
-          competências distintas selecionadas.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {uploads.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum arquivo importado ainda.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">Usar</TableHead>
-                <TableHead>Arquivo</TableHead>
-                <TableHead>Competência</TableHead>
-                <TableHead className="text-right">Registros</TableHead>
-                <TableHead className="text-right">Importado em</TableHead>
-                <TableHead className="w-12"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {uploads.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      checked={selectedUploadIds.includes(u.id)}
-                      onChange={() => toggleUpload(u.id)}
-                      className="h-4 w-4 accent-[color:var(--primary)]"
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{u.fileName}</TableCell>
-                  <TableCell><Badge variant="secondary">{u.competencia}</Badge></TableCell>
-                  <TableCell className="text-right">{fmt(u.recordCount)}</TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">
-                    {new Date(u.uploadedAt).toLocaleString("pt-BR")}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(u.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
+      <Card>
+        <CardHeader>
+          <CardTitle>Arquivos importados ({uploads.length})</CardTitle>
+          <CardDescription>
+            Marque quais competências devem entrar no cálculo de produção vs meta. Médias mensais usam o número de
+            competências distintas selecionadas.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {uploads.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum arquivo importado ainda.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">Usar</TableHead>
+                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Competência</TableHead>
+                  <TableHead className="text-right">Registros</TableHead>
+                  <TableHead className="text-right">Importado em</TableHead>
+                  <TableHead className="w-12"></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Campos lidos do .DBF</CardTitle>
-      </CardHeader>
-      <CardContent className="text-xs text-muted-foreground">
-        <p>
-          <strong>PRD_PA</strong> (código SIGTAP, 10 dígitos), <strong>PRD_CBO</strong> (ocupação),{" "}
-          <strong>PRD_QT_A</strong> (quantidade aprovada — usada como produção oficial),{" "}
-          <strong>PRD_QT_P</strong> (apresentada), <strong>PRD_VL_A</strong> (valor aprovado),{" "}
-          <strong>PRD_CMP</strong> (competência AAAAMM). Demais campos do layout SIA são ignorados nesta análise.
-        </p>
-      </CardContent>
-    </Card>
-  </div>
-);
+              </TableHeader>
+              <TableBody>
+                {uploads.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selectedUploadIds.includes(u.id)}
+                        onChange={() => toggleUpload(u.id)}
+                        className="h-4 w-4 accent-[color:var(--primary)]"
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{u.fileName}</TableCell>
+                    <TableCell><Badge variant="secondary">{u.competencia}</Badge></TableCell>
+                    <TableCell className="text-right">{fmt(u.recordCount)}</TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {new Date(u.uploadedAt).toLocaleString("pt-BR")}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(u.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 /* ───────────────────────── REGRAS / PROCEDIMENTOS ───────────────────────── */
@@ -576,9 +548,8 @@ function RulesTab() {
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>Sobre "DESCONTADO PT"</AlertTitle>
         <AlertDescription className="text-sm">
-          Algumas regras descontam procedimentos contados em outros itens (PT1=ponto 1, etc.). O painel <strong>identifica
-            e sinaliza</strong> esses casos automaticamente, mas o cruzamento exato deve ser revisado por aqui — você pode
-          editar manualmente quais códigos SIGTAP/CBO entram em cada procedimento para refletir a regra contratual.
+          Algumas regras descontam procedimentos contados em outros itens (PT1=ponto 1, etc.). O painel identifica
+          e sinaliza esses casos automaticamente.
         </AlertDescription>
       </Alert>
 
@@ -714,7 +685,7 @@ function ProductionTab() {
                 {rows.map((r) => {
                   const tone =
                     r.pct >= 95 ? "text-emerald-600" :
-                      r.pct >= 70 ? "text-amber-600" : "text-destructive";
+                    r.pct >= 70 ? "text-amber-600" : "text-destructive";
                   const Icon = r.pct >= 95 ? CheckCircle2 : AlertTriangle;
                   return (
                     <TableRow key={r.id}>
@@ -760,8 +731,8 @@ function DemandTab() {
   const base = showAll ? procedures : onlyReg;
   const list = filter
     ? procedures.filter(
-      (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
-    )
+        (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
+      )
     : base;
 
   const handleXlsx = async (file: File) => {
@@ -772,9 +743,6 @@ function DemandTab() {
       setDemandBulk(matched);
       const n = Object.keys(matched).length;
       toast.success(`Fila importada: ${n} item(s) atualizados${unmatched.length ? ` · ${unmatched.length} sem correspondência` : ""}`);
-      if (unmatched.length) {
-        console.warn("Itens não casados:", unmatched);
-      }
     } catch (e) {
       console.error(e);
       toast.error("Falha ao ler a planilha. Confira o formato das colunas.");
@@ -823,9 +791,7 @@ function DemandTab() {
         <AlertTitle>Cadastro da demanda represada</AlertTitle>
         <AlertDescription className="text-sm">
           Importe a planilha de fila (ARE) para preencher automaticamente <strong>fila atual</strong>,
-          <strong> entrada/mês</strong> e <strong>saída/mês</strong> agrupados por item da lista. Esses dados
-          alimentam a projeção de 60 meses, agora considerando também as saídas históricas (transferências,
-          abandono, óbito). Use os botões da nuvem para persistir os dados entre sessões.
+          <strong> entrada/mês</strong> e <strong>saída/mês</strong>.
         </AlertDescription>
       </Alert>
 
@@ -851,10 +817,6 @@ function DemandTab() {
             <CloudDownload className="mr-2 h-4 w-4" />
             {busy === "load" ? "Carregando…" : "Carregar da nuvem"}
           </Button>
-          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <Cloud className="h-4 w-4" />
-            Os dados ficam no backend Lovable Cloud e podem ser recarregados em qualquer máquina.
-          </div>
         </CardContent>
       </Card>
 
@@ -893,7 +855,6 @@ function DemandTab() {
                   const liquido = totalOutflow - d.entradaMensal;
                   return (
                     <Fragment key={p.id}>
-
                       <TableRow key={p.id}>
                         <TableCell className="font-mono text-xs">{p.id}</TableCell>
                         <TableCell className="text-sm leading-tight">
@@ -908,11 +869,6 @@ function DemandTab() {
                                 {t}
                               </Badge>
                             ))}
-                            {d.items.length > 0 && (
-                              <Badge variant="outline" className="text-[10px]">
-                                {d.items.length} proc. ARE
-                              </Badge>
-                            )}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -957,22 +913,7 @@ function DemandTab() {
                           )}
                         </TableCell>
                       </TableRow>
-                      {d.items.length > 1 && (
-                        <TableRow key={p.id + "-items"} className="bg-muted/30">
-                          <TableCell />
-                          <TableCell colSpan={6} className="py-1 text-[11px] text-muted-foreground">
-                            <span className="font-medium">Composição (ARE):</span>{" "}
-                            {d.items
-                              .map(
-                                (it) =>
-                                  `${it.nome} — fila ${fmt(it.fila)} · ent ${fmt(it.entrada, 1)} · sai ${fmt(it.saida, 1)}`,
-                              )
-                              .join(" • ")}
-                          </TableCell>
-                        </TableRow>
-                      )}
                     </Fragment>
-
                   );
                 })}
               </TableBody>
@@ -983,7 +924,6 @@ function DemandTab() {
     </div>
   );
 }
-
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
@@ -1017,7 +957,6 @@ function ProjectionTab() {
   const totalOutflow = capacidadeProposta + d.saidaMensal;
   const mZero = monthsToZero(d.filaAtual, d.entradaMensal, totalOutflow);
 
-  // Summary across all REGSMS procedures
   const summary = procedures.filter(x => x.tipo.includes("REGSMS")).map((x) => {
     const dd = demand[x.id];
     const cap = dd.metaPropostaHospital + dd.metaPropostaRegulacao;
@@ -1030,16 +969,13 @@ function ProjectionTab() {
     };
   });
 
-
   return (
     <div className="space-y-6">
       <Alert>
         <Calculator className="h-4 w-4" />
         <AlertTitle>Simulador de proposta de metas — convênio 60 meses</AlertTitle>
         <AlertDescription className="text-sm">
-          Ajuste as metas mensais de hospital (PS-AMB) e regulação (REGSMS) para o procedimento selecionado e veja
-          como a fila evolui ao longo dos 60 meses do convênio. A meta total proposta deve ser compatível com a
-          capacidade instalada declarada.
+          Ajuste as metas mensais de hospital e regulação para o procedimento selecionado e veja a evolução ao longo de 60 meses.
         </AlertDescription>
       </Alert>
 
@@ -1071,7 +1007,6 @@ function ProjectionTab() {
             <Row k="Entrada nova/mês" v={fmt(d.entradaMensal, 1)} />
             <Row k="Saída média/mês" v={fmt(d.saidaMensal, 1)} />
           </CardContent>
-
         </Card>
 
         <Card>
@@ -1079,7 +1014,6 @@ function ProjectionTab() {
           <CardContent>
             <Label className="text-xs">Meta mensal hospital</Label>
             <Input type="number" value={d.metaPropostaHospital} onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} />
-            <p className="mt-2 text-xs text-muted-foreground">Atende demanda interna de pronto-socorro e ambulatório.</p>
           </CardContent>
         </Card>
 
@@ -1088,7 +1022,6 @@ function ProjectionTab() {
           <CardContent>
             <Label className="text-xs">Meta mensal regulada</Label>
             <Input type="number" value={d.metaPropostaRegulacao} onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} />
-            <p className="mt-2 text-xs text-muted-foreground">Capacidade ofertada à fila de espera da SMS.</p>
           </CardContent>
         </Card>
       </div>
@@ -1097,22 +1030,15 @@ function ProjectionTab() {
         <CardHeader>
           <CardTitle>Evolução projetada da fila — 60 meses</CardTitle>
           <CardDescription>
-            Vazão total mensal:{" "}
-            <strong>{fmt(capacidadeProposta + d.saidaMensal, 1)}/mês</strong>{" "}
-            (meta proposta {fmt(capacidadeProposta)} + saídas externas {fmt(d.saidaMensal, 1)}) ·{" "}
-            entradas {fmt(d.entradaMensal, 1)}/mês ·{" "}
-            {mZero > 0
-              ? <>fila zera em aproximadamente <strong>{mZero} meses</strong>.</>
-              : <span className="text-destructive">vazão insuficiente — fila cresce indefinidamente.</span>}
+            {mZero > 0 ? <>Fila zera em aproximadamente <strong>{mZero} meses</strong>.</> : <span className="text-destructive">vazão insuficiente — fila cresce indefinidamente.</span>}
           </CardDescription>
-
         </CardHeader>
         <CardContent>
           <div className="h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={proj}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} label={{ value: "Mês do convênio", position: "insideBottom", offset: -2, fontSize: 11 }} />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} formatter={(v: number) => fmt(v)} />
                 <Legend />
@@ -1120,60 +1046,9 @@ function ProjectionTab() {
                 <Line type="monotone" dataKey="served" name="Atendidos (meta proposta)" stroke="var(--chart-4)" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="otherExits" name="Outras saídas" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="intake" name="Entradas no mês" stroke="var(--chart-3)" strokeWidth={2} dot={false} />
-
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Diagnóstico geral — procedimentos com regulação</CardTitle>
-          <CardDescription>
-            Resumo da viabilidade de zerar a fila considerando as metas atualmente propostas em cada item REGSMS.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-[400px]">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-14">ID</TableHead>
-                  <TableHead>Procedimento</TableHead>
-                  <TableHead className="text-right">Fila</TableHead>
-                  <TableHead className="text-right">Entrada/mês</TableHead>
-                  <TableHead className="text-right">Saída/mês</TableHead>
-                  <TableHead className="text-right">Meta proposta</TableHead>
-                  <TableHead className="text-right">Vazão total</TableHead>
-                  <TableHead className="text-right">Tempo p/ zerar</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summary.map((s) => (
-                  <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedId(s.id)}>
-                    <TableCell className="font-mono text-xs">{s.id}</TableCell>
-                    <TableCell className="text-sm leading-tight">{s.name}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.fila)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.entrada, 1)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.saida, 1)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.cap)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.outflow, 1)}</TableCell>
-                    <TableCell className="text-right">
-                      {s.mZero === -1 ? (
-                        <Badge variant="destructive" className="text-[10px]">Não zera</Badge>
-                      ) : s.mZero <= 60 ? (
-                        <Badge className="text-[10px] bg-emerald-600">{s.mZero} meses</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400">{s.mZero}m (&gt;60)</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-
-            </Table>
-          </ScrollArea>
         </CardContent>
       </Card>
     </div>
