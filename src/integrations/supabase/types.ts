@@ -14,7 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      demand_entries: {
+        Row: {
+          capacidade_mensal: number
+          entrada_mensal: number
+          fila_atual: number
+          items: Json
+          meta_proposta_hospital: number
+          meta_proposta_regulacao: number
+          procedure_id: string
+          saida_mensal: number
+          updated_at: string
+        }
+        Insert: {
+          capacidade_mensal?: number
+          entrada_mensal?: number
+          fila_atual?: number
+          items?: Json
+          meta_proposta_hospital?: number
+          meta_proposta_regulacao?: number
+          procedure_id: string
+          saida_mensal?: number
+          updated_at?: string
+        }
+        Update: {
+          capacidade_mensal?: number
+          entrada_mensal?: number
+          fila_atual?: number
+          items?: Json
+          meta_proposta_hospital?: number
+          meta_proposta_regulacao?: number
+          procedure_id?: string
+          saida_mensal?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
