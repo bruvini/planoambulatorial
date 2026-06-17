@@ -843,7 +843,8 @@ function DemandTab() {
                   const totalOutflow = d.capacidadeMensal + d.saidaMensal;
                   const liquido = totalOutflow - d.entradaMensal;
                   return (
-                    <>
+                    <Fragment key={p.id}>
+
                       <TableRow key={p.id}>
                         <TableCell className="font-mono text-xs">{p.id}</TableCell>
                         <TableCell className="text-sm leading-tight">
@@ -921,7 +922,8 @@ function DemandTab() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
+
                   );
                 })}
               </TableBody>
