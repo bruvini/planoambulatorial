@@ -240,25 +240,32 @@ function OverviewTab() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-[380px]">
+          <div className="h-[450px]"> {/* Altura aumentada para comportar melhor as 15 barras horizontais */}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
+                layout="vertical"
+                margin={{ left: 220, right: 20, top: 0, bottom: 0 }}
                 data={procedures
                   .slice()
                   .sort((a, b) => b.metaTotal - a.metaTotal)
                   .slice(0, 15)
-                  .map((p) => ({ name: p.id, hosp: p.metaHospital, reg: p.metaRegulacao }))}
+                  .map((p) => ({
+                    // Usa o nome real e corta caso seja muito longo para não empurrar o gráfico
+                    name: p.name.length > 40 ? p.name.substring(0, 40) + "…" : p.name,
+                    hosp: p.metaHospital,
+                    reg: p.metaRegulacao
+                  }))}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={true} vertical={true} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={210} />
                 <Tooltip
                   contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
                   formatter={(v: number) => fmt(v)}
                 />
                 <Legend />
                 <Bar dataKey="hosp" name="PS-AMB (Hospital)" stackId="a" fill="var(--chart-1)" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="reg" name="REGSMS (Regulação)" stackId="a" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="reg" name="REGSMS (Regulação)" stackId="a" fill="var(--chart-2)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -331,10 +338,10 @@ function UploadTab() {
             uploadedAt: new Date().toISOString(),
             production,
           };
-          
+
           await saveUploadToCloud(upload);
           addUpload(upload);
-          
+
           toast.success(`${file.name} salvo na nuvem — ${fmt(dbf.recordCount)} registros · competência ${competencia}.`);
         } catch (e: any) {
           console.error(e);
@@ -685,7 +692,7 @@ function ProductionTab() {
                 {rows.map((r) => {
                   const tone =
                     r.pct >= 95 ? "text-emerald-600" :
-                    r.pct >= 70 ? "text-amber-600" : "text-destructive";
+                      r.pct >= 70 ? "text-amber-600" : "text-destructive";
                   const Icon = r.pct >= 95 ? CheckCircle2 : AlertTriangle;
                   return (
                     <TableRow key={r.id}>
@@ -731,8 +738,8 @@ function DemandTab() {
   const base = showAll ? procedures : onlyReg;
   const list = filter
     ? procedures.filter(
-        (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
-      )
+      (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
+    )
     : base;
 
   const handleXlsx = async (file: File) => {
