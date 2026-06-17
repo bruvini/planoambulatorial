@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity, Upload, ListChecks, BarChart3, Users2, TrendingUp,
   FileSpreadsheet, Trash2, AlertTriangle, CheckCircle2, Info,
-  Calculator, RotateCcw, Download,
+  Calculator, RotateCcw, Download, Cloud, CloudDownload, CloudUpload,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -31,6 +31,9 @@ import { parseDbfFile, type DbfRow } from "@/lib/dbf-parser";
 import { aggregateProduction, projectQueue, monthsToZero } from "@/lib/analytics";
 import { useStore, type DbfUpload } from "@/lib/store";
 import type { Procedure } from "@/lib/procedures-data";
+import { parseFilaXlsx } from "@/lib/fila-xlsx";
+import { saveDemandToCloud, loadDemandFromCloud } from "@/lib/demand-sync";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
