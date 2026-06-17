@@ -1019,8 +1019,10 @@ function ProjectionTab() {
             <Row k="Meta regulação contratual" v={`${fmt(p.metaRegulacao)}/mês`} />
             <Row k="Produção média real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
             <Row k="Fila atual" v={fmt(d.filaAtual)} />
-            <Row k="Entrada nova/mês" v={fmt(d.entradaMensal)} />
+            <Row k="Entrada nova/mês" v={fmt(d.entradaMensal, 1)} />
+            <Row k="Saída média/mês" v={fmt(d.saidaMensal, 1)} />
           </CardContent>
+
         </Card>
 
         <Card>
@@ -1046,11 +1048,15 @@ function ProjectionTab() {
         <CardHeader>
           <CardTitle>Evolução projetada da fila — 60 meses</CardTitle>
           <CardDescription>
-            Capacidade total proposta: <strong>{fmt(d.metaPropostaHospital + d.metaPropostaRegulacao)}/mês</strong> ·
+            Vazão total mensal:{" "}
+            <strong>{fmt(capacidadeProposta + d.saidaMensal, 1)}/mês</strong>{" "}
+            (meta proposta {fmt(capacidadeProposta)} + saídas externas {fmt(d.saidaMensal, 1)}) ·{" "}
+            entradas {fmt(d.entradaMensal, 1)}/mês ·{" "}
             {mZero > 0
-              ? <> fila zera em aproximadamente <strong>{mZero} meses</strong>.</>
-              : <> <span className="text-destructive">capacidade insuficiente — fila cresce indefinidamente.</span></>}
+              ? <>fila zera em aproximadamente <strong>{mZero} meses</strong>.</>
+              : <span className="text-destructive">vazão insuficiente — fila cresce indefinidamente.</span>}
           </CardDescription>
+
         </CardHeader>
         <CardContent>
           <div className="h-[340px]">
@@ -1062,8 +1068,10 @@ function ProjectionTab() {
                 <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} formatter={(v: number) => fmt(v)} />
                 <Legend />
                 <Line type="monotone" dataKey="queue" name="Fila acumulada" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="served" name="Atendidos no mês" stroke="var(--chart-4)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="served" name="Atendidos (meta proposta)" stroke="var(--chart-4)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="otherExits" name="Outras saídas" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="intake" name="Entradas no mês" stroke="var(--chart-3)" strokeWidth={2} dot={false} />
+
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1086,7 +1094,9 @@ function ProjectionTab() {
                   <TableHead>Procedimento</TableHead>
                   <TableHead className="text-right">Fila</TableHead>
                   <TableHead className="text-right">Entrada/mês</TableHead>
-                  <TableHead className="text-right">Capac./mês</TableHead>
+                  <TableHead className="text-right">Saída/mês</TableHead>
+                  <TableHead className="text-right">Meta proposta</TableHead>
+                  <TableHead className="text-right">Vazão total</TableHead>
                   <TableHead className="text-right">Tempo p/ zerar</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1096,8 +1106,10 @@ function ProjectionTab() {
                     <TableCell className="font-mono text-xs">{s.id}</TableCell>
                     <TableCell className="text-sm leading-tight">{s.name}</TableCell>
                     <TableCell className="text-right font-mono text-xs">{fmt(s.fila)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmt(s.entrada)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{fmt(s.entrada, 1)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{fmt(s.saida, 1)}</TableCell>
                     <TableCell className="text-right font-mono text-xs">{fmt(s.cap)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{fmt(s.outflow, 1)}</TableCell>
                     <TableCell className="text-right">
                       {s.mZero === -1 ? (
                         <Badge variant="destructive" className="text-[10px]">Não zera</Badge>
@@ -1110,6 +1122,7 @@ function ProjectionTab() {
                   </TableRow>
                 ))}
               </TableBody>
+
             </Table>
           </ScrollArea>
         </CardContent>
