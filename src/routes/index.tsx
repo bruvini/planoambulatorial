@@ -1005,6 +1005,8 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
+/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
+
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -1026,15 +1028,13 @@ function ProjectionTab() {
 
   const prodMensalReal = months > 0 ? (prodMap[selectedId]?.produced ?? 0) / months : 0;
   
-  // TICKET MÉDIO FINANCEIRO (Apenas se tiver produção importada)
+  // TICKET MÉDIO FINANCEIRO
   const unitPrice = prodMap[selectedId]?.produced > 0 
     ? prodMap[selectedId].valueApproved / prodMap[selectedId].produced 
     : 0;
 
   // ----------------------------------------------------------------------
-  // CORREÇÃO DO MOTOR DA FILA: EVITANDO DUPLA CONTAGEM
-  // A saída média do SISREG (d.saidaMensal) já inclui o que NÓS atendemos hoje.
-  // "Outras saídas" = pessoas que foram para outros hospitais, desistiram ou faleceram.
+  // MOTOR DA FILA: EVITANDO DUPLA CONTAGEM
   // ----------------------------------------------------------------------
   const currentTotalCapacity = p.metaHospital + p.metaRegulacao;
   const currentRegCapacity = p.metaRegulacao; 
@@ -1042,20 +1042,20 @@ function ProjectionTab() {
   const baseOtherExits = Math.max(0, d.saidaMensal - currentRegCapacity);
 
   // --- CENÁRIO 1: STATUS QUO (Contrato Atual) ---
-  const currentOutflow = currentRegCapacity + baseOtherExits; // Equivalente à Saída SISREG real
+  const currentOutflow = currentRegCapacity + baseOtherExits;
   const mZeroCurrent = monthsToZero(d.filaAtual, d.entradaMensal, currentOutflow);
   const projCurrent = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
-    monthlyExits: baseOtherExits, // Passamos apenas as "outras saídas"
-    capacity: currentRegCapacity, // Passamos apenas a regulação
+    monthlyExits: baseOtherExits,
+    capacity: currentRegCapacity,
     months: 60,
   });
 
   // --- CENÁRIO 2: PROPOSTA (Valores Simulados) ---
   const proposedTotalCapacity = d.metaPropostaHospital + d.metaPropostaRegulacao;
   const proposedRegCapacity = d.metaPropostaRegulacao;
-  const proposedOutflow = proposedRegCapacity + baseOtherExits; // Apenas regulação mexe na fila
+  const proposedOutflow = proposedRegCapacity + baseOtherExits;
   const mZeroProposed = monthsToZero(d.filaAtual, d.entradaMensal, proposedOutflow);
   const projProposed = projectQueue({
     initialQueue: d.filaAtual,
@@ -1091,7 +1091,6 @@ function ProjectionTab() {
     return (val > 0 ? "+" : "") + val.toFixed(1) + "%";
   };
 
-  // O déficit é calculado considerando todas as forças do município (nós + outros)
   const isDeficit = proposedOutflow < d.entradaMensal;
 
   // --- RESUMO DE ALTERAÇÕES E RESET ---
@@ -1222,8 +1221,8 @@ function ProjectionTab() {
               Cenário Simulado
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 flex flex-col justify-between h-full">
-            <div className="space-y-4 mt-1">
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-4">
                 <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
                 <Input 
@@ -1244,16 +1243,18 @@ function ProjectionTab() {
               </div>
             </div>
             
-            <div className="pt-3 border-t border-primary/20 flex flex-col gap-1.5">
+            <div className="pt-3 border-t border-primary/20 space-y-3">
               <div className="flex justify-between font-semibold text-sm">
                 <span className="text-primary/80">Nossa Oferta Total</span>
                 <span className="text-primary">{fmt(proposedTotalCapacity)}</span>
               </div>
               
-              {/* ALERTA CRÍTICO DE DÉFICIT DA FILA MUNICIPAL */}
-              <div className="flex justify-between text-[11px] items-center bg-background/50 rounded p-1.5">
-                <span className="text-muted-foreground font-medium leading-tight">Vazão Fila (Regulação + HMSJ) <br/>vs Entrada Mensal</span>
-                <span className={`px-2 py-0.5 rounded font-bold ${proposedOutflow < d.entradaMensal ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-600"}`}>
+              {/* ALERTA CRÍTICO - REORGANIZADO PARA NÃO ENCAVALAR */}
+              <div className="flex flex-col items-center justify-center gap-1.5 bg-background/60 rounded-md p-2 border border-primary/10">
+                <span className="text-muted-foreground font-medium text-[11px] leading-tight text-center">
+                  Vazão Fila (Regulação + HMSJ) vs Entrada Mensal
+                </span>
+                <span className={`px-3 py-1 rounded text-xs font-bold w-full text-center ${proposedOutflow < d.entradaMensal ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-600"}`}>
                   {fmt(proposedOutflow, 1)} / {fmt(d.entradaMensal, 1)}
                 </span>
               </div>
