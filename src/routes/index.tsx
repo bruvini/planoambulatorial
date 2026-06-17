@@ -936,10 +936,13 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
+/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
+
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
   const setDemand = useStore((s) => s.setDemand);
+  const setDemandBulk = useStore((s) => s.setDemandBulk);
   const uploads = useStore((s) => s.uploads);
   const selectedUploadIds = useStore((s) => s.selectedUploadIds);
   const prodMap = useMemo(
@@ -980,14 +983,14 @@ function ProjectionTab() {
     months: 60,
   });
 
-  // --- DADOS PARA O GRÁFICO (Mescla as duas linhas) ---
+  // --- DADOS PARA O GRÁFICO ---
   const chartData = projCurrent.map((curr, idx) => ({
     month: curr.month,
     filaAtual: curr.queue,
     filaProposta: projProposed[idx]?.queue ?? 0,
   }));
 
-  // --- CÁLCULOS DE DELTA PARA O RELATÓRIO ---
+  // --- CÁLCULOS DE DELTA ---
   const diffHosp = d.metaPropostaHospital - p.metaHospital;
   const pctHosp = p.metaHospital > 0 ? (diffHosp / p.metaHospital) * 100 : (diffHosp > 0 ? 100 : 0);
 
@@ -1000,6 +1003,27 @@ function ProjectionTab() {
   const formatPct = (val: number) => {
     if (val === 0) return "0%";
     return (val > 0 ? "+" : "") + val.toFixed(1) + "%";
+  };
+
+  // Lógica da previsão corrigida: o risco real é a vazão ser menor que a entrada
+  const isDeficit = proposedOutflow < d.entradaMensal;
+
+  // --- RESUMO DE ALTERAÇÕES E RESET ---
+  const changedList = procedures.filter(proc => {
+    const dem = demand[proc.id];
+    return dem && (dem.metaPropostaHospital !== proc.metaHospital || dem.metaPropostaRegulacao !== proc.metaRegulacao);
+  });
+
+  const handleResetAll = () => {
+    const resets: Record<string, Partial<DemandEntry>> = {};
+    changedList.forEach((proc) => {
+      resets[proc.id] = {
+        metaPropostaHospital: proc.metaHospital,
+        metaPropostaRegulacao: proc.metaRegulacao,
+      };
+    });
+    setDemandBulk(resets);
+    toast.success("Todas as simulações foram restauradas para o contrato original.");
   };
 
   return (
@@ -1094,7 +1118,7 @@ function ProjectionTab() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* GRÁFICO (Ocupa 2/3 do espaço) */}
+        {/* GRÁFICO */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Trajetória da Fila de Espera</CardTitle>
@@ -1116,7 +1140,6 @@ function ProjectionTab() {
                   />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                   
-                  {/* Linha Antiga (Cinza e Tracejada) */}
                   <Line 
                     type="monotone" 
                     dataKey="filaAtual" 
@@ -1128,7 +1151,6 @@ function ProjectionTab() {
                     activeDot={{ r: 4 }} 
                   />
                   
-                  {/* Linha Nova (Sólida e Destacada) */}
                   <Line 
                     type="monotone" 
                     dataKey="filaProposta" 
@@ -1144,7 +1166,7 @@ function ProjectionTab() {
           </CardContent>
         </Card>
 
-        {/* RELATÓRIO EXECUTIVO (Ocupa 1/3 do espaço) */}
+        {/* RELATÓRIO EXECUTIVO */}
         <Card className="bg-primary text-primary-foreground flex flex-col shadow-md">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg">Relatório Executivo</CardTitle>
@@ -1153,7 +1175,6 @@ function ProjectionTab() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 space-y-5 text-sm">
-            {/* Impacto nas Metas */}
             <div>
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
                 Impacto Operacional (Agendas)
@@ -1171,13 +1192,26 @@ function ProjectionTab() {
               </ul>
             </div>
 
-            {/* Impacto na Fila (Cor Dinâmica com base no resultado) */}
             <div className="pt-2">
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
                 Previsão de Fila (Projeção)
               </div>
               
-              {mZeroProposed > 0 && mZeroProposed <= 60 ? (
+              {isDeficit ? (
+                <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
+                  <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
+                  <p className="leading-snug">
+                    Risco Crítico! A vazão simulada ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
+                  </p>
+                </div>
+              ) : mZeroProposed === 0 ? (
+                <div className="flex items-start gap-2 bg-blue-500/20 p-3 rounded-md border border-blue-400/30 text-blue-50">
+                  <CheckCircle2 className="h-5 w-5 text-blue-300 mt-0.5 shrink-0" />
+                  <p className="leading-snug">
+                    Fluxo Equilibrado! A fila atual já está zerada e a vazão proposta ({fmt(proposedOutflow)}/mês) é suficiente para cobrir as entradas.
+                  </p>
+                </div>
+              ) : mZeroProposed <= 60 ? (
                 <div className="flex items-start gap-2 bg-emerald-500/20 p-3 rounded-md border border-emerald-400/30 text-emerald-50">
                   <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
@@ -1185,24 +1219,91 @@ function ProjectionTab() {
                     {mZeroCurrent === -1 && <span className="opacity-80 block mt-1">Lembrando que no Status Quo a fila cresce sem previsão de zerar.</span>}
                   </p>
                 </div>
-              ) : mZeroProposed > 60 ? (
+              ) : (
                 <div className="flex items-start gap-2 bg-amber-500/20 p-3 rounded-md border border-amber-400/30 text-amber-50">
                   <AlertTriangle className="h-5 w-5 text-amber-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Atenção: A fila levará <strong>mais de 60 meses</strong> para zerar ({mZeroProposed} meses). O aumento proposto é insuficiente para a vigência deste convênio.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
-                  <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
-                  <p className="leading-snug">
-                    Risco Crítico! A vazão simulada ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
+                    Atenção: A fila levará <strong>mais de 60 meses</strong> para zerar {mZeroProposed === -1 ? "(ou nunca zerará)" : `(${mZeroProposed} meses)`}. O aumento proposto é insuficiente.
                   </p>
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
+
+        {/* LISTA DE ALTERAÇÕES - Só aparece se algo foi modificado */}
+        {changedList.length > 0 && (
+          <Card className="lg:col-span-3 border-primary/20 bg-muted/10">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-base">Resumo das Simulações (Deltas)</CardTitle>
+                <CardDescription>
+                  Abaixo estão todos os procedimentos cujas propostas diferem do contrato atual.
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleResetAll}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Restaurar Originais
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Procedimento</TableHead>
+                    <TableHead className="text-right">Hospital Atual</TableHead>
+                    <TableHead className="text-right">Hospital Proposto</TableHead>
+                    <TableHead className="text-right border-l border-border/50">Regulação Atual</TableHead>
+                    <TableHead className="text-right">Regulação Proposta</TableHead>
+                    <TableHead className="text-right border-l border-border/50">Impacto Mensal</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {changedList.map(proc => {
+                    const dem = demand[proc.id];
+                    const difH = dem.metaPropostaHospital - proc.metaHospital;
+                    const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
+                    const difTot = difH + difR;
+                    return (
+                      <TableRow 
+                        key={proc.id} 
+                        className="cursor-pointer hover:bg-muted/50" 
+                        onClick={() => setSelectedId(proc.id)}
+                      >
+                        <TableCell className="font-medium text-xs max-w-[300px] truncate" title={proc.name}>
+                          {proc.id} - {proc.name}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">{fmt(proc.metaHospital)}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {fmt(dem.metaPropostaHospital)}
+                          {difH !== 0 && (
+                            <span className={`ml-2 text-[10px] ${difH > 0 ? "text-emerald-500" : "text-destructive"}`}>
+                              {difH > 0 ? "+" : ""}{fmt(difH)}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground border-l border-border/50">{fmt(proc.metaRegulacao)}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {fmt(dem.metaPropostaRegulacao)}
+                          {difR !== 0 && (
+                            <span className={`ml-2 text-[10px] ${difR > 0 ? "text-emerald-500" : "text-destructive"}`}>
+                              {difR > 0 ? "+" : ""}{fmt(difR)}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-bold border-l border-border/50">
+                          <span className={difTot > 0 ? "text-emerald-600" : difTot < 0 ? "text-destructive" : ""}>
+                            {difTot > 0 ? "+" : ""}{fmt(difTot)}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
