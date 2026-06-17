@@ -240,32 +240,37 @@ function OverviewTab() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-[450px]"> {/* Altura aumentada para comportar melhor as 15 barras horizontais */}
+          <div className="h-[500px]"> {/* Altura ajustada para dar respiro aos textos */}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 layout="vertical"
-                margin={{ left: 220, right: 20, top: 0, bottom: 0 }}
+                margin={{ left: 0, right: 30, top: 0, bottom: 0 }} // Margem esquerda zerada (o YAxis já vai fazer esse papel)
                 data={procedures
                   .slice()
                   .sort((a, b) => b.metaTotal - a.metaTotal)
                   .slice(0, 15)
                   .map((p) => ({
-                    // Usa o nome real e corta caso seja muito longo para não empurrar o gráfico
-                    name: p.name.length > 40 ? p.name.substring(0, 40) + "…" : p.name,
+                    // Como agora temos mais espaço real, podemos deixar até 55 caracteres sem cortar
+                    name: p.name.length > 55 ? p.name.substring(0, 55) + "…" : p.name,
                     hosp: p.metaHospital,
                     reg: p.metaRegulacao
                   }))}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={true} vertical={true} />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={210} />
+
+                {/* O width agora é de 340px, garantindo que o texto fique em uma linha só e encoste no gráfico */}
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={340} />
+
                 <Tooltip
                   contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
                   formatter={(v: number) => fmt(v)}
                 />
                 <Legend />
-                <Bar dataKey="hosp" name="PS-AMB (Hospital)" stackId="a" fill="var(--chart-1)" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="reg" name="REGSMS (Regulação)" stackId="a" fill="var(--chart-2)" radius={[0, 4, 4, 0]} />
+
+                {/* minPointSize garante que proporções muito baixas continuem visíveis */}
+                <Bar dataKey="hosp" name="PS-AMB (Hospital)" stackId="a" fill="var(--chart-1)" radius={[0, 0, 0, 0]} minPointSize={2} />
+                <Bar dataKey="reg" name="REGSMS (Regulação)" stackId="a" fill="var(--chart-2)" radius={[0, 4, 4, 0]} minPointSize={4} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1093,20 +1098,20 @@ function ProjectionTab() {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaHospital} 
-                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
+              <Input
+                type="number"
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
+                value={d.metaPropostaHospital}
+                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })}
               />
             </div>
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
-              <Input 
-                type="number" 
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
-                value={d.metaPropostaRegulacao} 
-                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
+              <Input
+                type="number"
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
+                value={d.metaPropostaRegulacao}
+                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })}
               />
             </div>
             <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
@@ -1133,32 +1138,32 @@ function ProjectionTab() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} 
-                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]} 
-                    labelFormatter={(label) => `Mês do Convênio: ${label}`} 
+                  <Tooltip
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]}
+                    labelFormatter={(label) => `Mês do Convênio: ${label}`}
                   />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                  
-                  <Line 
-                    type="monotone" 
-                    dataKey="filaAtual" 
-                    name="Contrato Atual (Status Quo)" 
-                    stroke="var(--muted-foreground)" 
-                    strokeWidth={2} 
-                    strokeDasharray="5 5" 
-                    dot={false} 
-                    activeDot={{ r: 4 }} 
+
+                  <Line
+                    type="monotone"
+                    dataKey="filaAtual"
+                    name="Contrato Atual (Status Quo)"
+                    stroke="var(--muted-foreground)"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    activeDot={{ r: 4 }}
                   />
-                  
-                  <Line 
-                    type="monotone" 
-                    dataKey="filaProposta" 
-                    name="Cenário Simulado" 
-                    stroke="var(--primary)" 
-                    strokeWidth={3} 
-                    dot={false} 
-                    activeDot={{ r: 6 }} 
+
+                  <Line
+                    type="monotone"
+                    dataKey="filaProposta"
+                    name="Cenário Simulado"
+                    stroke="var(--primary)"
+                    strokeWidth={3}
+                    dot={false}
+                    activeDot={{ r: 6 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1196,7 +1201,7 @@ function ProjectionTab() {
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
                 Previsão de Fila (Projeção)
               </div>
-              
+
               {isDeficit ? (
                 <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
                   <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
@@ -1265,9 +1270,9 @@ function ProjectionTab() {
                     const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
                     const difTot = difH + difR;
                     return (
-                      <TableRow 
-                        key={proc.id} 
-                        className="cursor-pointer hover:bg-muted/50" 
+                      <TableRow
+                        key={proc.id}
+                        className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(proc.id)}
                       >
                         <TableCell className="font-medium text-xs max-w-[300px] truncate" title={proc.name}>
