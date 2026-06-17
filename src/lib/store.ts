@@ -3,30 +3,37 @@ import { persist } from "zustand/middleware";
 import { PROCEDURES, type Procedure } from "./procedures-data";
 
 export type DbfUpload = {
-  id: string; // uuid
+  id: string;
   fileName: string;
-  competencia: string; // AAAAMM extracted from PRD_CMP majority
+  competencia: string;
   recordCount: number;
   uploadedAt: string;
-  // Aggregated produced per procedure id (computed at upload time so we don't re-parse)
   production: Record<string, { produced: number; presented: number; valueApproved: number; records: number }>;
+};
+
+export type DemandItem = {
+  nome: string;          // "Procedimento da Fila (ARE)"
+  fila: number;
+  entrada: number;
+  saida: number;
 };
 
 export type DemandEntry = {
   procedureId: string;
-  filaAtual: number;       // current waiting-list size
-  entradaMensal: number;   // new patients/month
-  capacidadeMensal: number; // declared hospital monthly capacity
-  metaPropostaHospital: number; // user-proposed PS-AMB monthly target
-  metaPropostaRegulacao: number; // user-proposed REGSMS monthly target
+  filaAtual: number;
+  entradaMensal: number;
+  saidaMensal: number;           // ← NOVO: média mensal de saídas (vazão atual)
+  capacidadeMensal: number;
+  metaPropostaHospital: number;
+  metaPropostaRegulacao: number;
+  items: DemandItem[];           // composição vinda da planilha (vários ARE por item da lista)
 };
 
 type Store = {
   procedures: Procedure[];
   uploads: DbfUpload[];
-  selectedUploadIds: string[]; // which to include in analysis (default all)
+  selectedUploadIds: string[];
   demand: Record<string, DemandEntry>;
-  // actions
   setProcedures: (p: Procedure[]) => void;
   updateProcedure: (id: string, patch: Partial<Procedure>) => void;
   resetProcedures: () => void;
@@ -34,6 +41,7 @@ type Store = {
   removeUpload: (id: string) => void;
   toggleUpload: (id: string) => void;
   setDemand: (id: string, patch: Partial<DemandEntry>) => void;
+  setDemandBulk: (entries: Record<string, Partial<DemandEntry>>) => void;
   initDemandFromProcedure: (id: string) => void;
   clearAll: () => void;
 };
@@ -42,9 +50,11 @@ const defaultDemand = (p: Procedure): DemandEntry => ({
   procedureId: p.id,
   filaAtual: 0,
   entradaMensal: 0,
+  saidaMensal: 0,
   capacidadeMensal: p.metaTotal,
   metaPropostaHospital: p.metaHospital,
   metaPropostaRegulacao: p.metaRegulacao,
+  items: [],
 });
 
 export const useStore = create<Store>()(
@@ -56,9 +66,7 @@ export const useStore = create<Store>()(
       demand: Object.fromEntries(PROCEDURES.map((p) => [p.id, defaultDemand(p)])),
       setProcedures: (p) => set({ procedures: p }),
       updateProcedure: (id, patch) =>
-        set({
-          procedures: get().procedures.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-        }),
+        set({ procedures: get().procedures.map((p) => (p.id === id ? { ...p, ...patch } : p)) }),
       resetProcedures: () =>
         set({
           procedures: PROCEDURES,
@@ -77,13 +85,26 @@ export const useStore = create<Store>()(
             ? get().selectedUploadIds.filter((x) => x !== id)
             : [...get().selectedUploadIds, id],
         }),
-      setDemand: (id, patch) =>
+      setDemand: (id, patch) => {
+        const proc = get().procedures.find((p) => p.id === id);
+        if (!proc) return;
         set({
           demand: {
             ...get().demand,
-            [id]: { ...(get().demand[id] ?? defaultDemand(get().procedures.find((p) => p.id === id)!)), ...patch },
+            [id]: { ...(get().demand[id] ?? defaultDemand(proc)), ...patch },
           },
-        }),
+        });
+      },
+      setDemandBulk: (entries) => {
+        const cur = get().demand;
+        const next = { ...cur };
+        for (const [id, patch] of Object.entries(entries)) {
+          const proc = get().procedures.find((p) => p.id === id);
+          if (!proc) continue;
+          next[id] = { ...(cur[id] ?? defaultDemand(proc)), ...patch };
+        }
+        set({ demand: next });
+      },
       initDemandFromProcedure: (id) => {
         const p = get().procedures.find((x) => x.id === id);
         if (!p) return;
@@ -100,22 +121,3 @@ export const useStore = create<Store>()(
     { name: "hmsj-conv-ambulatorio-v1" },
   ),
 );
-
-// Helper: aggregated production across selected uploads, per procedure
-export function selectAggregatedProduction(state: Store) {
-  const map: Record<string, { produced: number; presented: number; valueApproved: number; months: number }> = {};
-  for (const p of state.procedures) map[p.id] = { produced: 0, presented: 0, valueApproved: 0, months: 0 };
-  const selected = state.uploads.filter((u) => state.selectedUploadIds.includes(u.id));
-  for (const u of selected) {
-    for (const p of state.procedures) {
-      const v = u.production[p.id];
-      if (!v) continue;
-      map[p.id].produced += v.produced;
-      map[p.id].presented += v.presented;
-      map[p.id].valueApproved += v.valueApproved;
-    }
-  }
-  const monthsCount = new Set(selected.map((u) => u.competencia)).size || 1;
-  for (const id in map) map[id].months = monthsCount;
-  return map;
-}
