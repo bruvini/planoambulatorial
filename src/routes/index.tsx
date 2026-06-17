@@ -1001,6 +1001,8 @@ function DemandTab() {
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
+/* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
+
 function ProjectionTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
@@ -1021,28 +1023,35 @@ function ProjectionTab() {
   const d = demand[selectedId];
 
   const prodMensalReal = months > 0 ? (prodMap[selectedId]?.produced ?? 0) / months : 0;
+  
+  // TICKET MÉDIO FINANCEIRO (Apenas se tiver produção importada)
+  const unitPrice = prodMap[selectedId]?.produced > 0 
+    ? prodMap[selectedId].valueApproved / prodMap[selectedId].produced 
+    : 0;
 
   // --- CENÁRIO 1: STATUS QUO (Contrato Atual) ---
-  const currentCapacity = p.metaTotal;
-  const currentOutflow = currentCapacity + d.saidaMensal;
+  const currentTotalCapacity = p.metaHospital + p.metaRegulacao;
+  const currentRegCapacity = p.metaRegulacao; 
+  const currentOutflow = currentRegCapacity + d.saidaMensal; // APENAS REGULAÇÃO IMPACTA A FILA
   const mZeroCurrent = monthsToZero(d.filaAtual, d.entradaMensal, currentOutflow);
   const projCurrent = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
     monthlyExits: d.saidaMensal,
-    capacity: currentCapacity,
+    capacity: currentRegCapacity, // Passa apenas a regulação
     months: 60,
   });
 
   // --- CENÁRIO 2: PROPOSTA (Valores Simulados) ---
-  const proposedCapacity = d.metaPropostaHospital + d.metaPropostaRegulacao;
-  const proposedOutflow = proposedCapacity + d.saidaMensal;
+  const proposedTotalCapacity = d.metaPropostaHospital + d.metaPropostaRegulacao;
+  const proposedRegCapacity = d.metaPropostaRegulacao;
+  const proposedOutflow = proposedRegCapacity + d.saidaMensal; // APENAS REGULAÇÃO IMPACTA A FILA
   const mZeroProposed = monthsToZero(d.filaAtual, d.entradaMensal, proposedOutflow);
   const projProposed = projectQueue({
     initialQueue: d.filaAtual,
     monthlyIntake: d.entradaMensal,
     monthlyExits: d.saidaMensal,
-    capacity: proposedCapacity,
+    capacity: proposedRegCapacity, // Passa apenas a regulação
     months: 60,
   });
 
@@ -1060,8 +1069,12 @@ function ProjectionTab() {
   const diffReg = d.metaPropostaRegulacao - p.metaRegulacao;
   const pctReg = p.metaRegulacao > 0 ? (diffReg / p.metaRegulacao) * 100 : (diffReg > 0 ? 100 : 0);
 
-  const diffTotal = proposedCapacity - currentCapacity;
-  const pctTotal = currentCapacity > 0 ? (diffTotal / currentCapacity) * 100 : (diffTotal > 0 ? 100 : 0);
+  const diffTotal = proposedTotalCapacity - currentTotalCapacity;
+  const pctTotal = currentTotalCapacity > 0 ? (diffTotal / currentTotalCapacity) * 100 : (diffTotal > 0 ? 100 : 0);
+
+  const finCurrent = currentTotalCapacity * unitPrice;
+  const finProposed = proposedTotalCapacity * unitPrice;
+  const finDelta = finProposed - finCurrent;
 
   const formatPct = (val: number) => {
     if (val === 0) return "0%";
@@ -1088,24 +1101,28 @@ function ProjectionTab() {
     toast.success("Todas as simulações foram restauradas para o contrato original.");
   };
 
-  // --- EXPORTAÇÃO NATIVA (Fricção Zero) ---
+  // --- EXPORTAÇÃO NATIVA (Incluindo Financeiro) ---
   const handleExport = (format: "csv" | "xls" | "pdf" | "png") => {
     if (format === "csv" || format === "xls") {
       const isCsv = format === "csv";
       let content = isCsv
-        ? "Procedimento,Hospital Atual,Hospital Proposto,Regulacao Atual,Regulacao Proposta,Impacto Mensal\n"
-        : "<html><meta charset='utf-8'><body><table border='1'><tr><th>Procedimento</th><th>Hospital Atual</th><th>Hospital Proposto</th><th>Regulação Atual</th><th>Regulação Proposta</th><th>Impacto Mensal</th></tr>";
+        ? "Procedimento,Hospital Atual,Hospital Proposto,Regulacao Atual,Regulacao Proposta,Impacto Físico,Impacto Financeiro (R$)\n"
+        : "<html><meta charset='utf-8'><body><table border='1'><tr><th>Procedimento</th><th>Hospital Atual</th><th>Hospital Proposto</th><th>Regulação Atual</th><th>Regulação Proposta</th><th>Impacto Físico</th><th>Impacto Financeiro (R$)</th></tr>";
 
       changedList.forEach((proc) => {
         const dem = demand[proc.id];
         const difH = dem.metaPropostaHospital - proc.metaHospital;
         const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
         const difTot = difH + difR;
+        
+        const pUnitPrice = prodMap[proc.id]?.produced > 0 ? prodMap[proc.id].valueApproved / prodMap[proc.id].produced : 0;
+        const pFinDelta = difTot * pUnitPrice;
 
         if (isCsv) {
-          content += `"${proc.id} - ${proc.name}",${proc.metaHospital},${dem.metaPropostaHospital},${proc.metaRegulacao},${dem.metaPropostaRegulacao},${difTot}\n`;
+          const safeName = proc.name.replace(/"/g, "'");
+          content += `"${proc.id} - ${safeName}",${proc.metaHospital},${dem.metaPropostaHospital},${proc.metaRegulacao},${dem.metaPropostaRegulacao},${difTot},${pFinDelta.toFixed(2)}\n`;
         } else {
-          content += `<tr><td>${proc.id} - ${proc.name}</td><td>${proc.metaHospital}</td><td>${dem.metaPropostaHospital}</td><td>${proc.metaRegulacao}</td><td>${dem.metaPropostaRegulacao}</td><td>${difTot}</td></tr>`;
+          content += `<tr><td>${proc.id} - ${proc.name}</td><td>${proc.metaHospital}</td><td>${dem.metaPropostaHospital}</td><td>${proc.metaRegulacao}</td><td>${dem.metaPropostaRegulacao}</td><td>${difTot}</td><td>${pFinDelta.toFixed(2)}</td></tr>`;
         }
       });
 
@@ -1134,11 +1151,11 @@ function ProjectionTab() {
         <TrendingUp className="h-4 w-4" />
         <AlertTitle>Painel de Negociação — Cenário 60 Meses</AlertTitle>
         <AlertDescription className="text-sm">
-          Selecione um procedimento abaixo para comparar a trajetória da fila mantendo o <strong>Status Quo</strong> (contrato atual) versus o <strong>Cenário Simulado</strong>. Ajuste os valores propostos na tabela para encontrar o equilíbrio que permita zerar a demanda reprimida.
+          Selecione um procedimento abaixo. O gráfico de trajetória responde <strong>exclusivamente</strong> às mudanças na meta de <strong>Regulação</strong>. Ajustes na meta do Hospital alteram o faturamento total, mas não reduzem a fila externa.
         </AlertDescription>
       </Alert>
 
-      {/* SELETOR DE PROCEDIMENTO (FILTRADO APENAS PARA REGSMS) */}
+      {/* SELETOR DE PROCEDIMENTO */}
       <Card>
         <CardContent className="pt-6">
           <select
@@ -1160,15 +1177,15 @@ function ProjectionTab() {
         <Card className="flex flex-col justify-between">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Demanda e Histórico
+              Demanda de Regulação
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <Row k="Fila atual" v={fmt(d.filaAtual)} />
+            <Row k="Fila externa atual" v={fmt(d.filaAtual)} />
             <Row k="Entrada nova/mês" v={fmt(d.entradaMensal, 1)} />
             <Row k="Saída externa/mês" v={fmt(d.saidaMensal, 1)} />
             <div className="pt-2 border-t border-border">
-              <Row k="Produção média real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
+              <Row k="Produção total real" v={months ? `${fmt(prodMensalReal, 1)}/mês` : "sem dados"} />
             </div>
           </CardContent>
         </Card>
@@ -1183,7 +1200,7 @@ function ProjectionTab() {
             <Row k="Hospital (PS-AMB)" v={fmt(p.metaHospital)} />
             <Row k="Regulação (REGSMS)" v={fmt(p.metaRegulacao)} />
             <div className="pt-2 border-t border-border font-medium text-foreground">
-              <Row k="Vazão Contratual Mensal" v={fmt(currentCapacity)} />
+              <Row k="Total Físico Contratado" v={fmt(currentTotalCapacity)} />
             </div>
           </CardContent>
         </Card>
@@ -1197,25 +1214,25 @@ function ProjectionTab() {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Hospital (PS-AMB)</Label>
-              <Input
-                type="number"
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
-                value={d.metaPropostaHospital}
-                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })}
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaHospital} 
+                onChange={(e) => setDemand(p.id, { metaPropostaHospital: Number(e.target.value) || 0 })} 
               />
             </div>
             <div className="flex items-center justify-between gap-4">
               <Label className="text-xs text-muted-foreground flex-1">Regulação (REGSMS)</Label>
-              <Input
-                type="number"
-                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary"
-                value={d.metaPropostaRegulacao}
-                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })}
+              <Input 
+                type="number" 
+                className="w-24 h-8 text-right bg-background border-primary/20 focus-visible:ring-primary" 
+                value={d.metaPropostaRegulacao} 
+                onChange={(e) => setDemand(p.id, { metaPropostaRegulacao: Number(e.target.value) || 0 })} 
               />
             </div>
             <div className="pt-2 border-t border-primary/20 flex justify-between font-semibold text-sm">
-              <span className="text-primary/80">Vazão Total Simulada</span>
-              <span className="text-primary">{fmt(proposedCapacity)}</span>
+              <span className="text-primary/80">Total Físico Simulado</span>
+              <span className="text-primary">{fmt(proposedTotalCapacity)}</span>
             </div>
           </CardContent>
         </Card>
@@ -1225,9 +1242,9 @@ function ProjectionTab() {
         {/* GRÁFICO */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Trajetória da Fila de Espera</CardTitle>
+            <CardTitle>Trajetória da Fila (Pacientes Regulados)</CardTitle>
             <CardDescription>
-              Comparativo visual entre não alterar o contrato (linha cinza tracejada) e adotar os números da simulação (linha colorida sólida).
+              Comparativo visual entre a vazão da regulação atual (linha cinza) e a vazão simulada (linha colorida sólida).
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1237,32 +1254,32 @@ function ProjectionTab() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]}
-                    labelFormatter={(label) => `Mês do Convênio: ${label}`}
+                  <Tooltip 
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} 
+                    formatter={(v: number, name: string) => [fmt(v), name === "filaAtual" ? "Fila (Status Quo)" : "Fila (Simulada)"]} 
+                    labelFormatter={(label) => `Mês do Convênio: ${label}`} 
                   />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-
-                  <Line
-                    type="monotone"
-                    dataKey="filaAtual"
-                    name="Contrato Atual (Status Quo)"
-                    stroke="var(--muted-foreground)"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    activeDot={{ r: 4 }}
+                  
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaAtual" 
+                    name="Contrato Atual (Status Quo)" 
+                    stroke="var(--muted-foreground)" 
+                    strokeWidth={2} 
+                    strokeDasharray="5 5" 
+                    dot={false} 
+                    activeDot={{ r: 4 }} 
                   />
-
-                  <Line
-                    type="monotone"
-                    dataKey="filaProposta"
-                    name="Cenário Simulado"
-                    stroke="var(--primary)"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 6 }}
+                  
+                  <Line 
+                    type="monotone" 
+                    dataKey="filaProposta" 
+                    name="Cenário Simulado" 
+                    stroke="var(--primary)" 
+                    strokeWidth={3} 
+                    dot={false} 
+                    activeDot={{ r: 6 }} 
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1278,10 +1295,10 @@ function ProjectionTab() {
               Resumo da simulação para apresentação
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 space-y-5 text-sm">
+          <CardContent className="flex-1 space-y-4 text-sm">
             <div>
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
-                Impacto Operacional (Agendas)
+                Impacto Operacional (Físico)
               </div>
               <ul className="space-y-2 border-l-2 border-primary-foreground/20 pl-3">
                 <li>
@@ -1291,43 +1308,67 @@ function ProjectionTab() {
                   <span className="opacity-80">Regulação:</span> de {fmt(p.metaRegulacao)} para <strong>{fmt(d.metaPropostaRegulacao)}</strong> ({formatPct(pctReg)})
                 </li>
                 <li className="pt-2 mt-2 border-t border-primary-foreground/20 font-medium">
-                  Oferta Total: de {fmt(currentCapacity)} para {fmt(proposedCapacity)} ({formatPct(pctTotal)})
+                  Oferta Geral: de {fmt(currentTotalCapacity)} para {fmt(proposedTotalCapacity)} ({formatPct(pctTotal)})
                 </li>
               </ul>
             </div>
 
+            {/* IMPACTO FINANCEIRO */}
             <div className="pt-2">
               <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
-                Previsão de Fila (Projeção)
+                Impacto Financeiro (SUS)
               </div>
+              {unitPrice > 0 ? (
+                <ul className="space-y-2 border-l-2 border-primary-foreground/20 pl-3">
+                  <li>
+                    <span className="opacity-80">Ticket Médio:</span> {fmtBRL(unitPrice)}
+                  </li>
+                  <li>
+                    <span className="opacity-80">Faturamento/mês:</span> de {fmtBRL(finCurrent)} para <strong>{fmtBRL(finProposed)}</strong>
+                  </li>
+                  <li className="pt-1 mt-1 font-medium">
+                    Saldo: <span className={finDelta > 0 ? "text-emerald-300" : finDelta < 0 ? "text-red-300" : ""}>
+                      {finDelta > 0 ? "+" : ""}{fmtBRL(finDelta)}/mês
+                    </span>
+                  </li>
+                </ul>
+              ) : (
+                <div className="text-xs opacity-80 italic pl-3 border-l-2 border-primary-foreground/20">
+                  Valor indisponível. Importe o DBF para ver a estimativa financeira.
+                </div>
+              )}
+            </div>
 
+            <div className="pt-2">
+              <div className="font-semibold text-primary-foreground/70 uppercase text-xs mb-2">
+                Previsão da Fila Regulada
+              </div>
               {isDeficit ? (
                 <div className="flex items-start gap-2 bg-destructive/40 p-3 rounded-md border border-destructive/50 text-destructive-foreground">
                   <TrendingUp className="h-5 w-5 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Risco Crítico! A vazão simulada ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
+                    Risco Crítico! A vazão de regulação ({fmt(proposedOutflow)}/mês) é menor que a entrada ({fmt(d.entradaMensal, 1)}/mês). A fila irá colapsar e crescer indefinidamente.
                   </p>
                 </div>
               ) : mZeroProposed === 0 ? (
                 <div className="flex items-start gap-2 bg-blue-500/20 p-3 rounded-md border border-blue-400/30 text-blue-50">
                   <CheckCircle2 className="h-5 w-5 text-blue-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Fluxo Equilibrado! A fila atual já está zerada e a vazão proposta ({fmt(proposedOutflow)}/mês) é suficiente para cobrir as entradas.
+                    Fluxo Equilibrado! A fila atual já está zerada e a vazão proposta da regulação ({fmt(proposedOutflow)}/mês) cobre as entradas.
                   </p>
                 </div>
               ) : mZeroProposed <= 60 ? (
                 <div className="flex items-start gap-2 bg-emerald-500/20 p-3 rounded-md border border-emerald-400/30 text-emerald-50">
                   <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Com a simulação proposta, a demanda reprimida será zerada no <strong>mês {mZeroProposed}</strong> do contrato.
-                    {mZeroCurrent === -1 && <span className="opacity-80 block mt-1">Lembrando que no Status Quo a fila cresce sem previsão de zerar.</span>}
+                    Com a regulação simulada, a demanda externa zera no <strong>mês {mZeroProposed}</strong> do contrato.
                   </p>
                 </div>
               ) : (
                 <div className="flex items-start gap-2 bg-amber-500/20 p-3 rounded-md border border-amber-400/30 text-amber-50">
                   <AlertTriangle className="h-5 w-5 text-amber-300 mt-0.5 shrink-0" />
                   <p className="leading-snug">
-                    Atenção: A fila levará <strong>mais de 60 meses</strong> para zerar {mZeroProposed === -1 ? "(ou nunca zerará)" : `(${mZeroProposed} meses)`}. O aumento proposto é insuficiente.
+                    Atenção: A fila levará <strong>mais de 60 meses</strong> para zerar {mZeroProposed === -1 ? "(ou nunca zerará)" : `(${mZeroProposed} meses)`}. A regulação proposta é insuficiente.
                   </p>
                 </div>
               )}
@@ -1335,7 +1376,7 @@ function ProjectionTab() {
           </CardContent>
         </Card>
 
-        {/* LISTA DE ALTERAÇÕES - Só aparece se algo foi modificado */}
+        {/* LISTA DE ALTERAÇÕES */}
         {changedList.length > 0 && (
           <Card className="lg:col-span-3 border-primary/20 bg-muted/10">
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 gap-4">
@@ -1385,7 +1426,8 @@ function ProjectionTab() {
                     <TableHead className="text-right">Hospital Proposto</TableHead>
                     <TableHead className="text-right border-l border-border/50">Regulação Atual</TableHead>
                     <TableHead className="text-right">Regulação Proposta</TableHead>
-                    <TableHead className="text-right border-l border-border/50">Impacto Mensal</TableHead>
+                    <TableHead className="text-right border-l border-border/50">Impacto Físico</TableHead>
+                    <TableHead className="text-right">Impacto Financeiro (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1394,10 +1436,14 @@ function ProjectionTab() {
                     const difH = dem.metaPropostaHospital - proc.metaHospital;
                     const difR = dem.metaPropostaRegulacao - proc.metaRegulacao;
                     const difTot = difH + difR;
+                    
+                    const pUnitPrice = prodMap[proc.id]?.produced > 0 ? prodMap[proc.id].valueApproved / prodMap[proc.id].produced : 0;
+                    const pFinDelta = difTot * pUnitPrice;
+
                     return (
-                      <TableRow
-                        key={proc.id}
-                        className="cursor-pointer hover:bg-muted/50"
+                      <TableRow 
+                        key={proc.id} 
+                        className="cursor-pointer hover:bg-muted/50" 
                         onClick={() => setSelectedId(proc.id)}
                       >
                         <TableCell className="font-medium text-xs max-w-[300px] truncate" title={proc.name}>
@@ -1425,6 +1471,13 @@ function ProjectionTab() {
                           <span className={difTot > 0 ? "text-emerald-600" : difTot < 0 ? "text-destructive" : ""}>
                             {difTot > 0 ? "+" : ""}{fmt(difTot)}
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {pUnitPrice > 0 ? (
+                            <span className={pFinDelta > 0 ? "text-emerald-600" : pFinDelta < 0 ? "text-destructive" : ""}>
+                              {pFinDelta > 0 ? "+" : ""}{fmtBRL(pFinDelta)}
+                            </span>
+                          ) : <span className="text-muted-foreground text-xs font-normal">Indisponível</span>}
                         </TableCell>
                       </TableRow>
                     );
