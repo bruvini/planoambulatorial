@@ -701,9 +701,71 @@ function DemandTab() {
   const procedures = useStore((s) => s.procedures);
   const demand = useStore((s) => s.demand);
   const setDemand = useStore((s) => s.setDemand);
+  const setDemandBulk = useStore((s) => s.setDemandBulk);
   const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [busy, setBusy] = useState<null | "import" | "save" | "load">(null);
+  const xlsxRef = useRef<HTMLInputElement>(null);
+
   const onlyReg = procedures.filter((p) => p.tipo.includes("REGSMS"));
-  const list = (filter ? procedures.filter(p => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter)) : onlyReg);
+  const base = showAll ? procedures : onlyReg;
+  const list = filter
+    ? procedures.filter(
+        (p) => p.fullName.toLowerCase().includes(filter.toLowerCase()) || p.id.includes(filter),
+      )
+    : base;
+
+  const handleXlsx = async (file: File) => {
+    setBusy("import");
+    try {
+      const buf = await file.arrayBuffer();
+      const { matched, unmatched } = parseFilaXlsx(buf, procedures);
+      setDemandBulk(matched);
+      const n = Object.keys(matched).length;
+      toast.success(`Fila importada: ${n} item(s) atualizados${unmatched.length ? ` · ${unmatched.length} sem correspondência` : ""}`);
+      if (unmatched.length) {
+        console.warn("Itens não casados:", unmatched);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Falha ao ler a planilha. Confira o formato das colunas.");
+    } finally {
+      setBusy(null);
+      if (xlsxRef.current) xlsxRef.current.value = "";
+    }
+  };
+
+  const handleSave = async () => {
+    setBusy("save");
+    try {
+      const n = await saveDemandToCloud(demand);
+      toast.success(`Salvo na nuvem: ${n} procedimento(s).`);
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao salvar na nuvem: " + (e?.message ?? "desconhecido"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleLoad = async () => {
+    setBusy("load");
+    try {
+      const loaded = await loadDemandFromCloud();
+      const n = Object.keys(loaded).length;
+      if (n === 0) {
+        toast.message("Nuvem vazia — nada para carregar ainda.");
+      } else {
+        setDemandBulk(loaded);
+        toast.success(`Carregado da nuvem: ${n} procedimento(s).`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao carregar da nuvem: " + (e?.message ?? "desconhecido"));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -711,14 +773,53 @@ function DemandTab() {
         <Info className="h-4 w-4" />
         <AlertTitle>Cadastro da demanda represada</AlertTitle>
         <AlertDescription className="text-sm">
-          Informe, para os procedimentos regulados (REGSMS), o tamanho atual da fila, a entrada média mensal de novos
-          pedidos e a capacidade instalada que o hospital consegue ofertar por mês. Esses dados alimentam a simulação
-          de 60 meses na próxima aba. Por padrão a lista mostra apenas procedimentos da regulação — use o filtro para
-          ver todos os 55.
+          Importe a planilha de fila (ARE) para preencher automaticamente <strong>fila atual</strong>,
+          <strong> entrada/mês</strong> e <strong>saída/mês</strong> agrupados por item da lista. Esses dados
+          alimentam a projeção de 60 meses, agora considerando também as saídas históricas (transferências,
+          abandono, óbito). Use os botões da nuvem para persistir os dados entre sessões.
         </AlertDescription>
       </Alert>
 
-      <Input placeholder="Filtrar (deixe vazio para mostrar só REGSMS)…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-md" />
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <input
+            ref={xlsxRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleXlsx(e.target.files[0])}
+          />
+          <Button onClick={() => xlsxRef.current?.click()} disabled={busy !== null}>
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            {busy === "import" ? "Importando…" : "Importar planilha de fila (.xlsx)"}
+          </Button>
+          <div className="mx-2 h-6 w-px bg-border" />
+          <Button variant="outline" onClick={handleSave} disabled={busy !== null}>
+            <CloudUpload className="mr-2 h-4 w-4" />
+            {busy === "save" ? "Salvando…" : "Salvar na nuvem"}
+          </Button>
+          <Button variant="outline" onClick={handleLoad} disabled={busy !== null}>
+            <CloudDownload className="mr-2 h-4 w-4" />
+            {busy === "load" ? "Carregando…" : "Carregar da nuvem"}
+          </Button>
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            <Cloud className="h-4 w-4" />
+            Os dados ficam no backend Lovable Cloud e podem ser recarregados em qualquer máquina.
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Filtrar por nome ou ID…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="max-w-sm"
+        />
+        <Button variant={showAll ? "default" : "outline"} size="sm" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Mostrando os 55" : "Só REGSMS"}
+        </Button>
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -728,43 +829,99 @@ function DemandTab() {
                 <TableRow>
                   <TableHead className="w-14">ID</TableHead>
                   <TableHead>Procedimento</TableHead>
-                  <TableHead className="text-right w-32">Fila atual</TableHead>
-                  <TableHead className="text-right w-32">Entrada/mês</TableHead>
-                  <TableHead className="text-right w-32">Capac./mês</TableHead>
-                  <TableHead className="text-right w-32">Status</TableHead>
+                  <TableHead className="text-right w-28">Fila atual</TableHead>
+                  <TableHead className="text-right w-28">Entrada/mês</TableHead>
+                  <TableHead className="text-right w-28">Saída/mês</TableHead>
+                  <TableHead className="text-right w-28">Capac./mês</TableHead>
+                  <TableHead className="text-right w-28">Líquido</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {list.map((p) => {
                   const d = demand[p.id];
                   if (!d) return null;
-                  const liquido = d.capacidadeMensal - d.entradaMensal;
+                  const totalOutflow = d.capacidadeMensal + d.saidaMensal;
+                  const liquido = totalOutflow - d.entradaMensal;
                   return (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-mono text-xs">{p.id}</TableCell>
-                      <TableCell className="text-sm leading-tight">
-                        {p.name}
-                        <div className="mt-0.5 flex gap-1">
-                          {p.tipo.map(t => <Badge key={t} variant={t === "REGSMS" ? "default" : "secondary"} className="text-[10px]">{t}</Badge>)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Input type="number" value={d.filaAtual} className="h-8 text-right" onChange={(e) => setDemand(p.id, { filaAtual: Number(e.target.value) || 0 })} />
-                      </TableCell>
-                      <TableCell>
-                        <Input type="number" value={d.entradaMensal} className="h-8 text-right" onChange={(e) => setDemand(p.id, { entradaMensal: Number(e.target.value) || 0 })} />
-                      </TableCell>
-                      <TableCell>
-                        <Input type="number" value={d.capacidadeMensal} className="h-8 text-right" onChange={(e) => setDemand(p.id, { capacidadeMensal: Number(e.target.value) || 0 })} />
-                      </TableCell>
-                      <TableCell className="text-right text-xs">
-                        {liquido > 0 ? (
-                          <span className="text-emerald-600">+{fmt(liquido)}/mês</span>
-                        ) : (
-                          <span className="text-destructive">{fmt(liquido)}/mês</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
+                    <>
+                      <TableRow key={p.id}>
+                        <TableCell className="font-mono text-xs">{p.id}</TableCell>
+                        <TableCell className="text-sm leading-tight">
+                          {p.name}
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {p.tipo.map((t) => (
+                              <Badge
+                                key={t}
+                                variant={t === "REGSMS" ? "default" : "secondary"}
+                                className="text-[10px]"
+                              >
+                                {t}
+                              </Badge>
+                            ))}
+                            {d.items.length > 0 && (
+                              <Badge variant="outline" className="text-[10px]">
+                                {d.items.length} proc. ARE
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            value={d.filaAtual}
+                            className="h-8 text-right"
+                            onChange={(e) => setDemand(p.id, { filaAtual: Number(e.target.value) || 0 })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            value={d.entradaMensal}
+                            className="h-8 text-right"
+                            onChange={(e) => setDemand(p.id, { entradaMensal: Number(e.target.value) || 0 })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            value={d.saidaMensal}
+                            className="h-8 text-right"
+                            onChange={(e) => setDemand(p.id, { saidaMensal: Number(e.target.value) || 0 })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            value={d.capacidadeMensal}
+                            className="h-8 text-right"
+                            onChange={(e) =>
+                              setDemand(p.id, { capacidadeMensal: Number(e.target.value) || 0 })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right text-xs">
+                          {liquido > 0 ? (
+                            <span className="text-emerald-600">+{fmt(liquido, 1)}/mês</span>
+                          ) : (
+                            <span className="text-destructive">{fmt(liquido, 1)}/mês</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      {d.items.length > 1 && (
+                        <TableRow key={p.id + "-items"} className="bg-muted/30">
+                          <TableCell />
+                          <TableCell colSpan={6} className="py-1 text-[11px] text-muted-foreground">
+                            <span className="font-medium">Composição (ARE):</span>{" "}
+                            {d.items
+                              .map(
+                                (it) =>
+                                  `${it.nome} — fila ${fmt(it.fila)} · ent ${fmt(it.entrada, 1)} · sai ${fmt(it.saida, 1)}`,
+                              )
+                              .join(" • ")}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   );
                 })}
               </TableBody>
@@ -775,6 +932,7 @@ function DemandTab() {
     </div>
   );
 }
+
 
 /* ───────────────────────── PROJEÇÃO 60 MESES ───────────────────────── */
 
